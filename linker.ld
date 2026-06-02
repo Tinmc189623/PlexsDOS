@@ -17,12 +17,12 @@ SECTIONS
     }
 
     .bss : {
-        _bss_start = .;
+        _bss_start = ABSOLUTE(.);
         *(.bss)
         *(COMMON)
     }
 
-    _bss_end = .;
+    _bss_end = ABSOLUTE(.);
     _end = .;
 
     /DISCARD/ : {
