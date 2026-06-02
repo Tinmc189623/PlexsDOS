@@ -1,0 +1,4 @@
+# Nexsteaduser — PlexsDOS
+# Python 依赖
+# 作者: Tinmc189623 | 团队: Nexlyh
+pyfatfs>=1.1.0
