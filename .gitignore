@@ -17,8 +17,8 @@ build/
 *.log
 temp/
 
-# Python 运行时发行版 (过大, 不纳入版本控制)
-Python/pythoncore-*/
+# Python 运行时发行版 (二进制, 不纳入版本控制)
+Python/
 
 # 外部源码 (FreeBSD 兼容层)
 freebsd-src/
