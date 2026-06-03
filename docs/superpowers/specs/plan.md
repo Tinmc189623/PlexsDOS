@@ -8,23 +8,45 @@
 
 ## 阶段总览
 
-| 阶段 | 内容 | 预计工作量 | 依赖 | 状态 |
-|------|------|-----------|------|------|
-| 1 | 构建系统与项目骨架 | 1 天 | 无 | ✅ 完成 |
-| 2 | 引导扇区 | 2 天 | 阶段 1 | ✅ 完成 |
-| 3 | 内核入口与基础框架 | 2 天 | 阶段 2 | ✅ 完成 |
-| 4 | 屏幕驱动 | 1 天 | 阶段 3 | ✅ 完成 |
-| 5 | 键盘驱动 | 2 天 | 阶段 4 | ✅ 完成 |
-| 6 | 中断处理框架 | 2 天 | 阶段 3 | ✅ 完成 |
-| 7 | Shell 实现 | 3 天 | 阶段 4, 5 | ✅ 完成 |
-| 8 | 文件系统 (FAT32) | 3 天 | 阶段 6 | ✅ 完成 |
-| 9 | 外部程序加载 | 2 天 | 阶段 7, 8 | ✅ 完成 |
-| 10 | 系统调用 (INT 21h) | 2 天 | 阶段 7 | ✅ 完成 |
-| 11 | 集成测试与调试 | 2 天 | 阶段 9, 10 | ✅ 完成 |
-| 12 | 通用处理器优化 (i686→SSE2→AVX) | 2 天 | 阶段 3 | ✅ 完成 |
-| 13 | PCI 总线与 ATA DMA | 3 天 | 阶段 8 | ✅ 完成 |
-| 14 | .comx 可执行格式 | 1 天 | 阶段 8, 9 | ✅ 完成 |
-| 15 | Python 镜像构建脚本 (pyfatfs) | 1 天 | 阶段 8 | ✅ 完成 |
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| 1 | 构建系统与项目骨架 | ✅ 完成 |
+| 2 | 引导扇区 (软盘) | ✅ 完成 |
+| 3 | 内核入口与基础框架 | ✅ 完成 |
+| 4 | 屏幕驱动 (VGA 文本模式) | ✅ 完成 |
+| 5 | 键盘驱动 (PS/2, IRQ1) | ✅ 完成 |
+| 6 | 中断处理框架 (IDT + 8259A PIC) | ✅ 完成 |
+| 7 | Shell 实现 (命令解析/内置命令) | ✅ 完成 |
+| 8 | 文件系统 (FAT12 + FAT32) | ✅ 完成 |
+| 9 | .comx 程序加载 | ✅ 完成 |
+| 10 | 系统调用 (INT 21h, DOS 兼容) | ✅ 完成 |
+| 11 | 集成测试与调试 (QEMU + Bochs) | ✅ 完成 |
+| 12 | 通用处理器优化 (i686→SSE2→AVX) | ✅ 完成 |
+| 13 | PCI 总线与 ATA PIO/DMA | ✅ 完成 |
+| 14 | .comx 可执行格式规范 | ✅ 完成 |
+| 15 | Python 镜像构建脚本 (pyfatfs) | ✅ 完成 |
+| 16 | C23 迁移 | ✅ 完成 |
+| 17 | 红屏 (RSOD) 内核恐慌 | ✅ 完成 |
+| 18 | C++ 中断管理器 | ✅ 完成 |
+| 19 | FDC 软盘控制器 (马达状态机, 写入, 多格式) | ✅ 完成 |
+| 20 | CD-ROM 驱动 (ATAPI + ISO 9660) | ✅ 完成 |
+| 21 | 硬盘 MBR/VBR 引导 | ✅ 完成 |
+| 22 | AHCI SATA 驱动 | ✅ 完成 |
+| 23 | 分页内存管理 (4KB 页) | ✅ 完成 |
+| 24 | 进程调度器 (抢占式多任务) | ✅ 完成 |
+| 25 | GUI 系统 (桌面/WM/Widgets) | ✅ 完成 |
+| 26 | 编辑器 | ✅ 完成 |
+| 27 | 多盘安装系统 | ✅ 完成 |
+| 28 | 驱动器抽象 (A:-E: 映射) | ✅ 完成 |
+| 29 | 用户账户系统 | ✅ 完成 |
+| 30 | 显示管理器 (PlexsDM / LightDM 移植) | ✅ 完成 |
+| 31 | HAL (硬件抽象层 + 块设备框架) | ✅ 完成 |
+| 32 | ISA 设备枚举 | ✅ 完成 |
+| 33 | 鼠标驱动 (PS/2, IRQ12) | ✅ 完成 |
+| 34 | 串口驱动 (COM1 调试输出) | ✅ 完成 |
+| 35 | ISO 9660 可引导光盘 (El Torito) | ✅ 完成 |
+| 36 | VMDK 虚拟硬盘 (40GB, 预装系统) | ✅ 完成 |
+| 37 | VGA 图形模式驱动 | ✅ 完成 |
 
 ---
 
@@ -51,130 +73,15 @@ PlexsDOS/
 └── build/          (构建输出，gitignore)
 ```
 
-### 关键实现
-
-#### Makefile
-
-```makefile
-# Nexsteaduser — PlexsDOS Makefile
-# 作者: Tinmc189623 | 团队: Nexlyh
-# 自研内核 (32-bit 保护模式)
-
-CC      = gcc
-AS      = as
-LD      = ld
-OBJCOPY = objcopy
-
-CFLAGS   = -m32 -ffreestanding -fno-builtin -nostdlib \
-           -Wall -Wextra -std=c99 -Os -Iinclude
-ASFLAGS  = --32 -Iinclude
-LD_KERN  = -m i386pe -T linker.ld -nostdlib
-
-BUILD_DIR = build
-
-SRCS_S := $(wildcard boot/*.S) $(wildcard kernel/*.S) \
-          $(wildcard kernel/arch/*.S) $(wildcard kernel/drivers/*.S)
-SRCS_C := $(wildcard kernel/*.c) $(wildcard kernel/arch/*.c) \
-          $(wildcard kernel/drivers/*.c) $(wildcard kernel/mm/*.c) \
-          $(wildcard kernel/shell/*.c) $(wildcard kernel/fs/*.c) \
-          $(wildcard lib/*.c)
-
-OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(SRCS_S)) \
-        $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS_C))
-
-BOOT_OBJ  = $(BUILD_DIR)/boot/boot_sector.o
-KERN_OBJS = $(filter-out $(BOOT_OBJ),$(OBJS))
-
-BOOT_BIN   = $(BUILD_DIR)/boot.bin
-KERNEL_BIN = $(BUILD_DIR)/kernel.bin
-FLOPPY_IMG = $(BUILD_DIR)/plexsdos.img
-
-.PHONY: all clean run
-
-all: $(FLOPPY_IMG)
-
-$(BUILD_DIR)/%.o: %.S
-	@mkdir -p $(dir $@)
-	$(AS) $(ASFLAGS) $< -o $@
-
-$(BUILD_DIR)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/boot.elf: $(BOOT_OBJ)
-	$(LD) -m i386pe -Ttext 0x7C00 -nostdlib $< -o $@
-
-$(BOOT_BIN): $(BUILD_DIR)/boot.elf
-	$(OBJCOPY) -O binary -j .text $< $@
-
-$(KERNEL_BIN): $(KERN_OBJS)
-	$(LD) $(LD_KERN) $^ -o $(BUILD_DIR)/kernel.exe
-	$(OBJCOPY) -O binary -j .text -j .rdata -j .rodata -j .data $(BUILD_DIR)/kernel.exe $@
-
-$(FLOPPY_IMG): $(BOOT_BIN) $(KERNEL_BIN)
-	dd if=/dev/zero of=$@ bs=512 count=2880
-	dd if=$(BOOT_BIN) of=$@ bs=512 count=1 conv=notrunc
-	dd if=$(KERNEL_BIN) of=$@ bs=512 seek=1 conv=notrunc
-
-run: $(FLOPPY_IMG)
-	qemu-system-i386 -fda $< -m 16M
-
-clean:
-	rm -rf $(BUILD_DIR)
-```
-
-#### linker.ld
-
-```ld
-/* Nexsteaduser — PlexsDOS 链接器脚本 (32-bit 保护模式) */
-/* 作者: Tinmc189623 | 团队: Nexlyh */
-
-ENTRY(_start)
-
-SECTIONS
-{
-    . = 0x1000;
-
-    .text : SUBALIGN(4) {
-        *(.text)
-    }
-
-    .rdata : SUBALIGN(4) {
-        *(.rdata)
-        *(.rdata*)
-    }
-
-    .rodata : SUBALIGN(4) {
-        *(.rodata*)
-    }
-
-    .data : SUBALIGN(4) {
-        *(.data)
-        *(.data*)
-    }
-
-    .bss : SUBALIGN(4) {
-        *(.bss)
-        *(COMMON)
-    }
-
-    _end = .;
-
-    /DISCARD/ : {
-        *(.reloc)
-    }
-}
-```
-
 ### 验证标准
 
-- [ ] `make clean && make` 编译无错误
-- [ ] 生成 `build/plexsdos.img` (1.44MB)
-- [ ] `make run` 启动 QEMU 并显示引导扇区输出
+- [x] `make clean && make` 编译无错误
+- [x] 生成 `build/plexsdos.img` (1.44MB)
+- [x] `make run` 启动 QEMU 并显示引导扇区输出
 
 ---
 
-## 阶段 2: 引导扇区
+## 阶段 2: 引导扇区 (软盘)
 
 ### 目标
 
@@ -186,21 +93,13 @@ SECTIONS
 boot/boot_sector.S       # 引导扇区主代码 (含 BPB、磁盘读取、GDT、PM 切换)
 ```
 
-### 关键实现
-
-引导扇区职责：
-1. 设置段寄存器和栈指针
-2. 检测引导驱动器号 (DL)
-3. 使用 BIOS INT 13h 读取内核扇区到 0x1000 (16-bit 实模式, 仅引导阶段)
-4. 设置 GDT 并切换到 32-bit 保护模式
-5. 远跳转到内核入口 0x1000
-
 ### 验证标准
 
-- [ ] 引导扇区 512 字节，以 0x55AA 结尾
-- [ ] BIOS 正确识别为可引导设备
-- [ ] 成功从软盘读取内核到 0x1000
-- [ ] 跳转到内核入口点执行
+- [x] 引导扇区 512 字节，以 0x55AA 结尾
+- [x] BIOS 正确识别为可引导设备
+- [x] 成功从软盘读取内核到 0x1000
+- [x] 跳转到内核入口点执行
+- [x] DL 寄存器保存的引导设备号正确传递
 
 ---
 
@@ -216,74 +115,21 @@ boot/boot_sector.S       # 引导扇区主代码 (含 BPB、磁盘读取、GDT�
 kernel/kernel_entry.S      # 内核入口 (汇编)
 kernel/kernel_main.c       # 内核主函数 (C)
 kernel/arch/gdt.S          # 全局描述符表 (可选)
-include/plexsdos/types.h   # 基础类型定义
+include/plexsdos/types.h   # 基础类型定义 (C23)
 include/plexsdos/config.h  # 系统配置常量
-```
-
-### 关键实现
-
-#### kernel/kernel_entry.S
-
-```gas
-# kernel/kernel_entry.S — PlexsDOS 内核入口 (32-bit 保护模式)
-# Nexsteaduser — PlexsDOS
-# 作者: Tinmc189623 | 团队: Nexlyh
-
-.code32
-.section .text
-
-.global _start
-_start:
-    /* 设置数据段选择子 (GDT 数据段 0x10) */
-    mov  $0x10, %ax
-    mov  %ax, %ds
-    mov  %ax, %es
-    mov  %ax, %fs
-    mov  %ax, %gs
-    mov  %ax, %ss
-
-    /* 设置栈 */
-    mov  $0x90000, %esp
-    mov  %esp, %ebp
-
-    /* 调用 C 内核主函数 */
-    call _kernel_main
-
-    /* kernel_main 不应返回，如返回则停机 */
-    cli
-    hlt
-```
-
-#### include/plexsdos/types.h
-
-```c
-/*
- * Nexsteaduser — PlexsDOS
- * 基础类型定义
- * 作者: Tinmc189623 | 团队: Nexlyh
- */
-
-#ifndef _PLXSDOS_TYPES_H
-#define _PLXSDOS_TYPES_H
-
-typedef unsigned char      uint8_t;
-typedef unsigned short     uint16_t;
-typedef unsigned long      uint32_t;
-typedef signed char        int8_t;
-typedef signed short       int16_t;
-typedef signed long        int32_t;
-typedef unsigned int       size_t;
-
-#define NULL ((void *)0)
-
-#endif /* _PLXSDOS_TYPES_H */
 ```
 
 ### 验证标准
 
-- [ ] 内核成功从引导扇区接管执行
-- [ ] C 函数 kernel_main() 被正确调用
-- [ ] 基础类型定义可用
+- [x] 内核从引导扇区接管执行
+- [x] C 函数 kernel_main() 被正确调用
+- [x] boot_drive 变量从 DL 寄存器正确保存
+- [x] 栈指针设置在 0x400000
+
+### 备注
+
+- 当前内核入口: 0x30000 (由 linker.ld 指定)
+- 引导阶段临时加载至 0x1000, 链接至 0x30000
 
 ---
 
@@ -297,36 +143,28 @@ typedef unsigned int       size_t;
 
 ```
 kernel/drivers/screen.c        # 屏幕驱动实现
-kernel/drivers/screen.S        # 底层端口操作 (AT&T 语法)
 include/plexsdos/screen.h      # 屏幕驱动接口
 ```
 
 ### 关键 API
 
 ```c
-void screen_init(void);                    // 初始化屏幕
-void screen_clear(void);                   // 清屏
-void screen_putchar(char c);               // 输出单个字符
-void screen_puts(const char *str);         // 输出字符串
-void screen_put_hex(uint32_t val);         // 输出十六进制数
-void screen_set_color(uint8_t fg, uint8_t bg); // 设置前景/背景色
-void screen_scroll(void);                  // 滚动屏幕
+void screen_init(void);
+void screen_clear(void);
+void screen_putchar(char c);
+void screen_puts(const char *str);
+void screen_put_hex(uint32_t val);
+void screen_set_color(uint8_t fg, uint8_t bg);
+void screen_scroll(void);
 ```
-
-### 实现要点
-
-- 直接写 VGA 显存 0xB8000
-- 每个字符占 2 字节 (ASCII + 属性)
-- 80x25 文本模式
-- 光标定位通过端口 0x3D4/0x3D5 控制
 
 ### 验证标准
 
-- [ ] 屏幕初始化为黑底白字
-- [ ] 字符串正确显示在屏幕上
-- [ ] 换行、退格、制表符正确处理
-- [ ] 屏幕滚动正常工作
-- [ ] 光标位置正确更新
+- [x] 屏幕初始化为黑底白字
+- [x] 字符串正确显示在屏幕上
+- [x] 换行、退格、制表符正确处理
+- [x] 屏幕滚动正常工作
+- [x] 光标位置正确更新
 
 ---
 
@@ -340,32 +178,25 @@ void screen_scroll(void);                  // 滚动屏幕
 
 ```
 kernel/drivers/keyboard.c      # 键盘驱动实现
-kernel/drivers/keyboard.S      # INT 9h 中断处理 (AT&T 语法)
 include/plexsdos/keyboard.h    # 键盘驱动接口
 ```
 
 ### 关键 API
 
 ```c
-void keyboard_init(void);           // 初始化键盘中断
-char keyboard_getchar(void);        // 阻塞读取一个字符
-int keyboard_available(void);       // 检查是否有按键
-char keyboard_read_line(char *buf, int max_len); // 读取一行输入
+void keyboard_init(void);
+char keyboard_getchar(void);
+int keyboard_available(void);
+char keyboard_read_line(char *buf, int max_len);
 ```
-
-### 实现要点
-
-- 注册 INT 0x09 中断处理程序
-- 维护键盘缓冲区 (环形队列)
-- 支持 Shift、Caps Lock、Backspace、Enter
-- 扫描码到 ASCII 转换表
 
 ### 验证标准
 
-- [ ] 按键输入正确回显到屏幕
-- [ ] Shift 键组合正常工作
-- [ ] 退格键正确删除字符
-- [ ] Enter 键正确提交输入
+- [x] 按键输入正确回显到屏幕
+- [x] Shift 键组合正常工作
+- [x] Caps Lock 切换正常
+- [x] 退格键正确删除字符
+- [x] Enter 键正确提交输入
 
 ---
 
@@ -386,25 +217,18 @@ include/plexsdos/interrupt.h     # 中断处理接口
 ### 关键 API
 
 ```c
-void idt_init(void);                              // 初始化 IDT
+void idt_init(void);
 void idt_set_gate(int vector, uint16_t selector,
-                  uint32_t offset, uint8_t flags); // 设置中断门
-void interrupt_register(int vector,
-                        void (*handler)(void));     // 注册处理程序
+                  uint32_t offset, uint8_t flags);
+void interrupt_register(int vector, void (*handler)(void));
 ```
-
-### 设计要点
-
-- 统一的中断分发机制
-- 中断处理程序注册/注销接口
-- 中断嵌套管理（保护模式下支持）
 
 ### 验证标准
 
-- [ ] IDT 正确初始化
-- [ ] 定时器中断 (IRQ0) 正常触发
-- [ ] 键盘中断 (IRQ1) 正常触发
-- [ ] 中断处理程序正确分发
+- [x] IDT 正确初始化 (256 向量)
+- [x] IRQ 重映射 (主 PIC: 0x20-0x27, 从 PIC: 0x28-0x2F)
+- [x] 键盘中断 (IRQ1) 正常触发
+- [x] EOI 正确发送
 
 ---
 
@@ -418,138 +242,63 @@ void interrupt_register(int vector,
 
 ```
 kernel/shell/shell.c             # Shell 主逻辑
-kernel/shell/builtin.c           # 内置命令实现
-kernel/shell/parser.c            # 命令解析器
 include/plexsdos/shell.h         # Shell 接口
 ```
 
-### 内置命令实现顺序
+### 内置命令
 
-1. `help` — 显示帮助
-2. `cls` — 清屏
-3. `ver` — 版本信息
-4. `echo` — 文本回显
-5. `mem` — 内存信息
-6. `time` / `date` — 时间日期
-7. `reboot` — 重启
-8. `dir` — 文件列表 (依赖阶段 8)
-9. `type` — 文件查看 (依赖阶段 8)
+- [x] `help` — 显示帮助
+- [x] `cls` — 清屏
+- [x] `ver` — 版本信息
+- [x] `echo` — 文本回显
+- [x] `mem` — 内存信息
+- [x] `reboot` — 重启
+- [x] `ls` — 文件列表
+- [x] `type` — 文件查看
+- [x] `run` — 程序加载执行
+- [x] `users` — 用户管理
 
 ### 验证标准
 
-- [ ] Shell 提示符正确显示
-- [ ] 命令行输入正确解析
-- [ ] 所有内置命令功能正常
-- [ ] 未知命令显示错误信息
-- [ ] 命令行编辑（退格）正常
+- [x] Shell 提示符正确显示
+- [x] 命令行输入正确解析
+- [x] 所有内置命令功能正常
+- [x] 未知命令显示错误信息
 
 ---
 
-## 阶段 8: 文件系统 (FAT32)
+## 阶段 8: 文件系统
 
 ### 目标
 
-实现 FAT32 文件系统读取支持。
+实现 FAT12/FAT32 文件系统读取支持。
 
 ### 文件清单
 
 ```
-kernel/fs/fat32.c                # FAT32 实现
-include/plexsdos/fat32.h         # FAT32 内部结构
+kernel/fs/fat12.c                # FAT12 实现 (软盘)
+kernel/fs/fat32.c                # FAT32 实现 (硬盘)
+include/plexsdos/fat12.h         # FAT12 接口
+include/plexsdos/fat32.h         # FAT32 接口
 tools/mkfat32.py                 # FAT32 镜像创建工具
+tools/mkfat12.py                 # FAT12 镜像创建工具
 ```
 
 ### 关键 API
 
 ```c
-bool fat32_init(void);                              // 初始化 FAT32
-void fat32_list_root(void);                         // 列出根目录
-struct fat32_dir_entry *fat32_find_file(const char *name); // 查找文件
-uint32_t fat32_load_file(struct fat32_dir_entry *entry,    // 加载文件
-                         uint32_t load_addr);
+bool fat32_init(void);
+void fat32_list_root(void);
+struct fat32_dir_entry *fat32_find_file(const char *name);
+uint32_t fat32_load_file(struct fat32_dir_entry *entry, uint32_t load_addr);
 ```
-
-### 实现要点
-
-- 通过 ATA 磁盘驱动读取扇区 (支持 PIO 和 DMA 模式)
-- 解析 FAT32 BPB 获取文件系统参数 (32-bit FAT 条目)
-- 遍历 FAT 表获取簇链 (28-bit 有效位)
-- 根目录在数据区 (簇 2), 按簇链遍历
 
 ### 验证标准
 
-- [ ] 正确读取 FAT32 BPB 参数
-- [ ] 根目录列表正确显示
-- [ ] 文件内容正确读取
-- [ ] `ls` 和 `type` 命令正常工作
-
----
-
-## 阶段 12: 通用处理器优化 (i686 → SSE2 → AVX)
-
-### 目标
-
-实现全系列 x86 处理器运行时优化，不限于奔腾3。
-
-### 文件清单
-
-```
-kernel/arch/cpu.c                # CPU 全特性检测与 SIMD 启用
-include/plexsdos/cpu.h           # CPU 接口定义 (SSE~AVX2, 3DNow!)
-lib/fast_mem.c                   # 运行时分派内存操作
-```
-
-### 关键功能
-
-- CPUID 全特性检测: leaf 1 EDX/ECX, leaf 7 EBX, extended 0x80000001
-- SSE 启用: CR4.OSFXSR + CR4.OSXMMEXCPT
-- AVX 启用: CR4.OSXSAVE + XSETBV (XMM+YMM 状态)
-- 编译器基线: `-march=i686` (通用 32-bit)
-- 函数级 SIMD 启用: `__attribute__((target("sse2")))` / `__attribute__((target("avx")))`
-- 运行时分派: 基线 (rep movsd) → SSE2 (MOVDQA 128-bit) → AVX (VMOVDQA 256-bit)
-
-### 验证标准
-
-- [x] CPUID 正确检测全系列 CPU 特性
-- [x] SSE/AVX 正确启用 (CR4 + XSETBV)
-- [x] fast_memcpy 运行时分派到最优路径
-- [x] fast_memset 运行时分派到最优路径
-- [x] fast_memcmp 运行时分派到最优路径
-- [x] `-march=i686` 基线编译无 SIMD 指令冲突
-
----
-
-## 阶段 13: PCI 总线与 ATA DMA
-
-### 目标
-
-实现 PCI 总线扫描和 ATA DMA 传输支持。
-
-### 文件清单
-
-```
-kernel/drivers/pci.c             # PCI 总线扫描
-include/plexsdos/pci.h           # PCI 接口定义
-kernel/drivers/disk.c            # ATA PIO + DMA 驱动
-include/plexsdos/disk.h          # 磁盘接口定义
-```
-
-### 关键功能
-
-- PCI 配置空间访问 (I/O 端口 0xCF8/0xCFC)
-- IDE 控制器扫描 (Class 0x01, Subclass 0x01)
-- Bus Master 启用 (PCI Command 寄存器)
-- PRDT (Physical Region Descriptor Table) 设置
-- ATA DMA READ (0xC8) 命令执行
-- DMA 传输完成检测
-
-### 验证标准
-
-- [ ] PCI 总线正确扫描
-- [ ] IDE 控制器正确识别
-- [ ] Bus Master 正确启用
-- [ ] DMA 传输正常工作
-- [ ] PIO 回退模式正常工作
+- [x] 正确读取 FAT32/FAT12 BPB 参数
+- [x] 根目录列表正确显示
+- [x] 文件内容正确读取
+- [x] `ls` 和 `type` 命令正常工作
 
 ---
 
@@ -557,7 +306,7 @@ include/plexsdos/disk.h          # 磁盘接口定义
 
 ### 目标
 
-支持加载和执行 .comx 格式外部程序 (自研 32-bit 可执行格式)。
+支持加载和执行 .comx 格式外部程序。
 
 ### 文件清单
 
@@ -565,17 +314,7 @@ include/plexsdos/disk.h          # 磁盘接口定义
 kernel/loader.c                  # .comx 程序加载器
 include/plexsdos/loader.h        # 加载器接口
 include/plexsdos/comx.h          # .comx 格式定义
-tools/mkcomx.py                  # .comx 打包工具
 ```
-
-### 实现要点
-
-- .comx 格式: 32 字节头部 (魔数、版本、标志、入口、代码大小、BSS、加载地址、校验和)
-- 从 FAT32 硬盘读取 .comx 文件
-- 验证头部魔数 (0x43505800)、版本、校验和
-- 检查 CPU 特性需求 (SSE/SSE2/MMX flags)
-- 复制代码到加载地址 (默认 0x20000)，清零 BSS
-- 跳转到入口点执行
 
 ### 验证标准
 
@@ -596,42 +335,87 @@ tools/mkcomx.py                  # .comx 打包工具
 ### 文件清单
 
 ```
-kernel/syscall.S                 # INT 21h 处理程序 (AT&T 语法)
-kernel/syscall.c                 # 系统调用分发
+kernel/arch/syscall.c            # 系统调用分发
+kernel/shim/int21.c              # INT 21h 额外处理
 include/plexsdos/syscall.h       # 系统调用定义
 ```
 
 ### 实现的子功能
 
-按优先级排序：
-1. AH=0x4C: 程序终止
-2. AH=0x02: 写字符
-3. AH=0x09: 写字符串
-4. AH=0x01: 读字符
-5. AH=0x0A: 读字符串
-6. AH=0x25/0x35: 中断向量操作
+- [x] AH=0x01: 读字符并回显
+- [x] AH=0x02: 写字符
+- [x] AH=0x09: 写字符串 ($ 结尾)
+- [x] AH=0x0A: 读字符串到缓冲区
+- [x] AH=0x4C: 程序终止
 
 ### 验证标准
 
-- [ ] INT 21h 正确分发到对应处理函数
-- [ ] 外部程序可调用所有已实现的子功能
-- [ ] 程序终止正确返回 Shell
+- [x] INT 21h 正确分发到对应处理函数
+- [x] 外部程序可调用所有已实现的子功能
+- [x] 程序终止正确返回 Shell
 
 ---
 
-## 阶段 14: .comx 可执行格式
+## 阶段 12: 通用处理器优化 (i686 → SSE2 → AVX)
 
 ### 目标
 
-发明 .comx 自研 32-bit 可执行格式，替代原始 flat binary。
+实现全系列 x86 处理器运行时优化。
+
+### 文件清单
+
+```
+kernel/arch/cpu.c                # CPU 全特性检测
+include/plexsdos/cpu.h           # CPU 接口定义
+lib/fast_mem.c                   # 运行时分派内存操作
+```
+
+### 验证标准
+
+- [x] CPUID 正确检测全系列 CPU 特性
+- [x] SSE/AVX 正确启用 (CR4 + XSETBV)
+- [x] fast_memcpy/memset/memcmp 运行时分派到最优路径
+- [x] `-march=i686` 基线编译无 SIMD 指令冲突
+
+---
+
+## 阶段 13: PCI 总线与 ATA PIO/DMA
+
+### 目标
+
+实现 PCI 总线扫描和 ATA 磁盘驱动。
+
+### 文件清单
+
+```
+kernel/drivers/pci.c             # PCI 总线扫描
+include/plexsdos/pci.h           # PCI 接口定义
+kernel/drivers/disk.c            # ATA PIO + DMA 驱动
+include/plexsdos/disk.h          # 磁盘接口定义
+```
+
+### 验证标准
+
+- [x] PCI 总线正确扫描
+- [x] IDE 控制器正确识别
+- [x] PIO 模式读写正常
+- [x] DMA 传输正常工作
+
+---
+
+## 阶段 14: .comx 可执行格式定义
+
+### 目标
+
+定义 .comx 自研 32-bit 可执行格式规范。
 
 ### 文件清单
 
 ```
 include/plexsdos/comx.h          # .comx 格式定义 (32 字节头部)
-kernel/loader.c                  # .comx 解析与加载器
 tools/mkcomx.py                  # .comx 打包工具
-programs/test_hello.S            # 测试程序 (.comx 输出)
+programs/test_hello.S            # 测试程序
+programs/pnp.S                   # PnP 管理器
 ```
 
 ### 验证标准
@@ -639,7 +423,7 @@ programs/test_hello.S            # 测试程序 (.comx 输出)
 - [x] .comx 头部结构定义完整
 - [x] mkcomx.py 正确生成 .comx 文件
 - [x] 内核 loader 正确解析和验证 .comx
-- [x] HELLO.COMX 在 QEMU 中正确执行
+- [x] HELLO.COMX / PNP.COMX 在 QEMU 中正确执行
 
 ---
 
@@ -647,44 +431,428 @@ programs/test_hello.S            # 测试程序 (.comx 输出)
 
 ### 目标
 
-使用 Python + pyfatfs 外部库构建 FAT12/FAT32 镜像，替代手写 dd 命令。
+使用 Python + pyfatfs 外部库构建 FAT12/FAT32 镜像。
 
 ### 文件清单
 
 ```
-tools/mkfloppy.py                # FAT12 软盘镜像创建 (1.44MB)
-tools/mkfat32.py                 # FAT32 硬盘镜像创建 (64MB, 使用 pyfatfs)
+tools/mkfloppy.py                # FAT12 软盘镜像 (1.44MB)
+tools/mkfat32.py                 # FAT32 硬盘镜像 (64MB)
+tools/mkfat12.py                 # FAT12 安装盘镜像
+tools/mkbootdisk.py              # 可引导安装盘
+tools/mkiso.py                   # ISO 9660 可引导光盘
+tools/mkvmdk.py                  # VMDK 虚拟硬盘
+tools/fix_vbr.py                 # VBR BPB 修正
 requirements.txt                 # Python 依赖 (pyfatfs>=1.1.0)
 ```
 
 ### 验证标准
 
 - [x] pyfatfs 正确安装和导入
-- [x] mkfat32.py 创建 64MB FAT32 镜像
-- [x] mkfloppy.py 创建 1.44MB FAT12 软盘镜像
-- [x] 文件正确写入 FAT32 镜像
-- [x] 内核 FAT32 驱动正确读取镜像中的文件
+- [x] 所有镜像类型正确生成
+- [x] ISO El Torito 可引导光盘工作
+- [x] VMDK 虚拟硬盘可启动
 
 ---
 
-## 阶段 11: 集成测试与调试
+## 阶段 16: C23 迁移
 
 ### 目标
 
-全面测试系统功能，修复 bug，完善文档。
+全项目 C 代码从 C99 升级到 C23 标准。
 
-### 测试矩阵
+### 改动
 
-| 测试项 | 方法 | 预期结果 |
-|--------|------|---------|
-| 冷启动 | QEMU 从软盘引导 | Shell 提示符出现 |
-| 热重启 | `reboot` 命令 | 系统重新引导 |
-| 字符输入 | 键盘输入测试 | 正确回显 |
-| 屏幕输出 | 多行文本 | 正确显示、滚动 |
-| 内存显示 | `mem` 命令 | 正确显示内存状态 |
-| 文件列表 | `dir` 命令 | 正确列出根目录文件 |
-| 文件查看 | `type FILE.TXT` | 正确显示文件内容 |
-| 程序执行 | 运行测试程序 | 程序正常运行并返回 |
+- `Makefile`: `-std=c99` → `-std=c23`
+- `types.h`: 使用 C23 原生 `bool`/`true`/`false`/`nullptr`
+- 所有 `.c` 文件适配 C23 语法
+
+### 验证标准
+
+- [x] `make clean && make` 编译通过
+- [x] `nullptr` 替代 `NULL`
+- [x] `bool`/`true`/`false` 作为关键字
+
+---
+
+## 阶段 17: 红屏 (RSOD) 内核恐慌
+
+### 目标
+
+实现类似 Windows BSOD 的内核恐慌诊断屏幕。
+
+### 文件清单
+
+```
+include/plexsdos/panic.h         # 红屏 API
+kernel/arch/panic.c              # 红屏实现
+```
+
+### API
+
+```c
+_Noreturn void kernel_panic(const char *fmt, ...);
+```
+
+### 验证标准
+
+- [x] CPU 异常 (0x00-0x1F) 正确触发红屏
+- [x] 红底白字全屏显示
+- [x] 显示寄存器状态 (EAX, EBX, ECX, EDX, ESI, EDI, EBP, ESP, EIP)
+- [x] 显示错误代码和地址
+- [x] 栈回溯 (EBP 链)
+- [x] 串口同步输出
+
+---
+
+## 阶段 18: C++ 中断管理器
+
+### 目标
+
+用 C++ 面向对象框架重写中断管理和系统调用分发。
+
+### 文件清单
+
+```
+include/plexsdos/interrupt.hpp   # C++ 中断管理器头文件
+kernel/arch/interrupt_mgr.cpp    # C++ 中断管理器实现
+kernel/arch/interrupt.S          # 汇编入口桩
+```
+
+### 类设计
+
+```cpp
+class InterruptHandler { virtual void handle(uint32_t, uint32_t) = 0; };
+class InterruptManager { static InterruptManager& instance(); ... };
+class SyscallDispatcher : public InterruptHandler { ... };
+```
+
+### 验证标准
+
+- [x] C++ 编译和链接通过 (-fno-exceptions -fno-rtti)
+- [x] 汇编桩正确调用 C++ dispatch 函数
+- [x] C/C++ 互操作正常
+- [x] 系统调用分发正常
+
+---
+
+## 阶段 19: FDC 软盘控制器
+
+### 目标
+
+全面改进 FDC 马达控制, 支持写入和多格式。
+
+### 文件清单
+
+```
+kernel/drivers/fdc.c            # FDC 驱动 (NEC 765)
+include/plexsdos/fdc.h          # FDC 接口
+```
+
+### 特性
+
+- [x] 马达状态机 (OFF → STARTING → ON → STOPPING)
+- [x] 多格式: 1.44MB / 1.2MB / 720KB
+- [x] WRITE DATA 命令写入
+- [x] 写保护检测
+- [x] 磁盘更换检测
+- [x] 旋转稳定延迟 300ms, 关闭延迟 2000ms
+
+---
+
+## 阶段 20: CD-ROM 驱动 (ATAPI + ISO 9660)
+
+### 目标
+
+完整的 CD-ROM 驱动, 支持读取 ISO 9660 文件系统。
+
+### 文件清单
+
+```
+include/plexsdos/cdrom.h         # CD-ROM API
+kernel/drivers/cdrom.c           # ATAPI + ISO 9660 实现
+```
+
+### 特性
+
+- [x] ATAPI PACKET 命令 (0xA0)
+- [x] 12 字节 CDB 命令集
+- [x] 2048 字节/扇区
+- [x] ISO 9660 PVD 解析
+- [x] 目录路径遍历
+- [x] Shell 命令: CDIR, CCAT, CDMOUNT
+
+---
+
+## 阶段 21: 硬盘 MBR/VBR 引导
+
+### 目标
+
+实现从硬盘启动, 支持 MBR + VBR 引导链。
+
+### 文件清单
+
+```
+boot/hd_mbr.S                   # 硬盘 MBR (分区表扫描)
+boot/hd_vbr.S                   # 硬盘 VBR (FAT32 引导)
+kernel/hd_boot.S                # HDD 启动代码 (嵌入)
+tools/fix_vbr.py                # VBR BPB 修正
+```
+
+### 特性
+
+- [x] MBR 分区表解析
+- [x] VBR FAT32 BPB 参数读取
+- [x] 内核从 FAT32 分区加载
+- [x] VBR BPB 字段自动修正
+
+---
+
+## 阶段 22: AHCI SATA 驱动
+
+### 目标
+
+实现 AHCI SATA 控制器驱动, 支持高速磁盘访问。
+
+### 文件清单
+
+```
+kernel/drivers/ahci.c           # AHCI SATA 驱动
+include/plexsdos/ahci.h         # AHCI 接口
+```
+
+### 特性
+
+- [x] PCI BAR5 (ABAR) 映射
+- [x] HBA 端口枚举
+- [x] Command List + PRDT
+- [x] NCQ 支持
+- [x] 读写扇区操作
+
+---
+
+## 阶段 23: 分页内存管理
+
+### 目标
+
+实现 4KB 页分页和物理帧分配器。
+
+### 文件清单
+
+```
+kernel/mm/paging.c              # 分页管理
+kernel/mm/pfa.c                 # 物理帧分配器
+include/plexsdos/paging.h       # 分页接口
+```
+
+### 特性
+
+- [x] 页目录 + 页表 (4KB 页)
+- [x] 身份映射 (虚拟=物理)
+- [x] CR0.PG 启用
+- [x] 物理帧分配器 (位图)
+- [x] 页目录/页表在 0x300000
+
+---
+
+## 阶段 24: 进程调度器
+
+### 目标
+
+实现抢占式多任务调度。
+
+### 文件清单
+
+```
+kernel/sched/scheduler.c         # 调度器实现
+include/plexsdos/scheduler.h     # 调度器接口
+```
+
+### 特性
+
+- [x] 抢占式多任务 (PIT 定时器驱动)
+- [x] 时间片轮转
+- [x] 任务控制块 (TCB)
+- [x] 任务创建/退出/让出
+
+---
+
+## 阶段 25: GUI 系统
+
+### 目标
+
+实现桌面环境、窗口管理器和小部件系统。
+
+### 文件清单
+
+```
+kernel/gui/desktop.c            # 桌面环境
+kernel/gui/wm.c                 # 窗口管理器
+kernel/gui/widgets.c            # GUI 小部件
+include/plexsdos/desktop.h      # 桌面接口
+include/plexsdos/wm.h           # 窗口接口
+include/plexsdos/widgets.h      # 小部件接口
+include/plexsdos/graphics.h     # 图形接口
+```
+
+### 特性
+
+- [x] 桌面背景 + 任务栏
+- [x] 窗口创建/销毁/移动
+- [x] Z-order 管理
+- [x] 鼠标事件分发
+- [x] 按钮/标签/输入框
+
+---
+
+## 阶段 26: 编辑器
+
+### 目标
+
+实现内置文本编辑器。
+
+### 文件清单
+
+```
+kernel/editor/editor.c           # 编辑器
+include/plexsdos/editor.h        # 编辑器接口
+```
+
+### 特性
+
+- [x] 文本文件编辑
+- [x] 光标移动
+- [x] 保存文件
+
+---
+
+## 阶段 27: 多盘安装系统
+
+### 目标
+
+实现 MS-DOS 风格的多盘安装程序。
+
+### 文件清单
+
+```
+kernel/installer.c               # 安装程序
+include/plexsdos/installer.h     # 安装程序接口
+```
+
+### 特性
+
+- [x] MS-DOS 风格换盘提示
+- [x] 文件复制显示 (文件名 + 大小)
+- [x] 错误重试 (最多 3 次)
+- [x] 磁盘验证
+- [x] 写入 MBR + 创建分区 + 复制文件
+
+---
+
+## 阶段 28: 驱动器抽象
+
+### 目标
+
+实现统一的驱动器字母映射系统。
+
+### 文件清单
+
+```
+kernel/drivers/drive.c          # 驱动器抽象
+include/plexsdos/drive.h        # 驱动器接口
+```
+
+### 映射
+
+| 字母 | 类型 |
+|------|------|
+| A: | 软盘 0 |
+| B: | 软盘 1 |
+| C: | 硬盘 (FAT32) |
+| D: | CD-ROM |
+| E:+ | 额外分区 |
+
+---
+
+## 阶段 29: 用户账户系统
+
+### 目标
+
+实现多用户账户管理。
+
+### 文件清单
+
+```
+kernel/shell/users.c            # 用户管理
+include/plexsdos/users.h        # 用户接口
+```
+
+### 特性
+
+- [x] 用户创建/删除/查询
+- [x] Shell 集成 (users 命令)
+
+---
+
+## 阶段 30: 显示管理器 (PlexsDM)
+
+### 目标
+
+移植 LightDM 为 PlexsDM 显示管理器。
+
+### 文件清单
+
+```
+kernel/dm/plxdm_*.c             # PlexsDM 实现
+kernel/dm/lightdm-core/         # LightDM 参考代码
+include/plexsdos/*              # 相关头文件
+```
+
+### 特性
+
+- [x] 显示管理
+- [x] 会话管理
+- [x] 用户选择
+- [x] 自动登录
+- [x] XDMCP 支持
+
+---
+
+## 阶段 31-37: 其他基础设施
+
+### 31. HAL (硬件抽象层)
+
+- [x] 块设备框架 (FDC/ATA 注册)
+- [x] I/O 操作抽象
+
+### 32. ISA 设备枚举
+
+- [x] ISA 传统设备扫描
+- [x] IRQ 冲突检测
+
+### 33. 鼠标驱动
+
+- [x] PS/2 鼠标 (IRQ12)
+- [x] 鼠标事件
+
+### 34. 串口驱动
+
+- [x] COM1 初始化
+- [x] 调试输出
+
+### 35. ISO 9660 可引导光盘
+
+- [x] El Torito 2.88MB 仿真
+- [x] 所有文件在单张光盘
+
+### 36. VMDK 虚拟硬盘
+
+- [x] 40GB 虚拟磁盘
+- [x] 预装 MBR + VBR + 内核 + 程序
+
+### 37. VGA 图形模式
+
+- [x] 图形模式切换
 
 ---
 

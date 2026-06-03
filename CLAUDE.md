@@ -51,38 +51,51 @@ PlexsDOS 是一个面向 x86 32-bit 保护模式的类 DOS 操作系统，采用
 ## 构建系统
 
 - 使用 GNU Make 作为构建系统
-- 工具链：GCC + GAS + LD (32-bit 目标, `-m32`)
-- 链接器脚本：控制内存布局和段分配
-- 构建产物：可引导的软盘镜像 (`.img`) 或 ISO
+- 工具链：GCC (mingw32) + GAS + LD (32-bit 目标, `-m32`)
+- C 标准：C23 (`-std=c23`)
+- C++ 标准：C++23 (`-std=c++23`, `-fno-exceptions -fno-rtti`)
+- 链接器脚本：内核 0x30000, BSS 0x200000
+- 构建产物：可引导软盘镜像 (`.img`), ISO 9660 光盘 (`.iso`), VMDK 虚拟硬盘 (`.vmdk`)
 
 ## 项目结构
 
 ```
 PlexsDOS/
-├── boot/          # 引导扇区代码 (MBR, bootloader)
+├── boot/          # 引导扇区 (boot_sector.S, hd_mbr.S, hd_vbr.S)
 ├── kernel/        # 内核代码
-│   ├── arch/      # 架构相关代码 (x86)
-│   ├── drivers/   # 设备驱动
-│   ├── fs/        # 文件系统
-│   ├── mm/        # 内存管理
-│   └── shell/     # 命令行 Shell
-├── include/       # 头文件
-├── lib/           # 库函数
-├── tools/         # 构建工具
+│   ├── arch/      # CPU/GDT/IDT/中断/红屏/系统调用
+│   ├── drivers/   # 设备驱动 (AHCI/ATA/FDC/CD-ROM/键盘/鼠标/屏幕/串口/PCI)
+│   ├── fs/        # 文件系统 (FAT12/FAT32/ISO 9660)
+│   ├── mm/        # 内存管理 (分页/物理帧分配)
+│   ├── shell/     # 命令行 Shell + 用户管理
+│   ├── sched/     # 进程调度器
+│   ├── gui/       # 桌面/窗口管理器/小部件
+│   ├── editor/    # 文本编辑器
+│   ├── hal/       # 硬件抽象层 (块设备/ISA)
+│   ├── dm/        # 显示管理器 (PlexsDM / LightDM 移植)
+│   └── shim/      # 兼容适配层
+├── include/       # 头文件 (plexsdos/libc/libcpp/X11/sys)
+├── lib/           # 库函数 (fast_mem, string)
+├── libcpp/        # C++ 头文件 (algorithm, array, type_traits)
+├── programs/      # 外部程序 (test_hello.S, pnp.S)
+├── tools/         # 构建工具 (Python: 镜像创建/打包)
 ├── docs/          # 文档
 ├── Makefile       # 主构建脚本
 ├── linker.ld      # 链接器脚本
-├── spec.md        # 技术规格
-├── plan.md        # 实现计划
-└── checklist.md   # 开发检查清单
+└── requirements.txt  # Python 依赖
 ```
 
 ## 程序接口
-- int 0x21
+- int 0x21 (DOS 兼容系统调用, 向量 0x22)
+- C++ InterruptManager / InterruptHandler OOP 框架
 
 ## 测试与验证
 
-- 使用 QEMU 进行功能测试：`qemu-system-i386 -fda build/plexsdos.img`
+- QEMU 测试：
+  - `make run` — 软盘 + 硬盘
+  - `make run-floppy` — 仅软盘
+  - `make run-iso` — 光盘 + 硬盘
+  - `make run-vmdk` — 虚拟硬盘启动
 - 使用 Bochs 进行精确硬件模拟调试
 - 每个模块完成后必须在模拟器中验证功能
 
