@@ -50,8 +50,8 @@ void paging_init(void)
     for (i = 0; i < 1024; i++)
         page_table_0[i] = 0;
 
-    /* 恒等映射前 1MB (256 个 4KB 页) */
-    for (i = 0; i < 256; i++) {
+    /* 恒等映射前 4MB (1024 个 4KB 页) */
+    for (i = 0; i < 1024; i++) {
         /* 默认: Supervisor, writable */
         flags = PAGE_PRESENT | PAGE_WRITABLE;
 
@@ -69,6 +69,17 @@ void paging_init(void)
 
     /* 页目录条目 0 → 页表 0 */
     page_directory[0] = (uint32_t)page_table_0 | PAGE_PRESENT | PAGE_WRITABLE;
+
+    /* 页表 1 在 0x102000, 映射 4-6MB 覆盖 BSS (0x200000 起, 约 4MB 大小) */
+    {
+        uint32_t *page_table_1 = (uint32_t *)0x102000;
+        for (i = 0; i < 1024; i++)
+            page_table_1[i] = 0;
+        for (i = 1024; i < 1536; i++) {
+            page_table_1[i - 1024] = (i * PAGE_SIZE) | PAGE_PRESENT | PAGE_WRITABLE;
+        }
+        page_directory[1] = (uint32_t)page_table_1 | PAGE_PRESENT | PAGE_WRITABLE;
+    }
 
     /* 设置 CR3 = 页目录物理地址 */
     __asm__ __volatile__("mov %0, %%cr3" : : "r"((uint32_t)page_directory) : "memory");
@@ -128,6 +139,52 @@ void tlb_flush_page(uint32_t vaddr)
 }
 
 /*
+ * page_table_is_empty — 检查页表是否所有条目均为非 Present
+ * @pd_idx: 页目录索引 (0 = 静态页表, 永不释放)
+ * 返回: true = 页表空, 可释放。
+ */
+static bool page_table_is_empty(uint32_t pd_idx)
+{
+    /* 页表 0 恒等映射内核/用户区, 永不释放 */
+    if (pd_idx == 0)
+        return false;
+
+    uint32_t *pt = (uint32_t *)(page_directory[pd_idx] & 0xFFFFF000);
+
+    /* 页目录条目不存在则视为空 */
+    if (!(page_directory[pd_idx] & PAGE_PRESENT))
+        return true;
+
+    for (int i = 0; i < 1024; i++) {
+        if (pt[i] & PAGE_PRESENT)
+            return false;
+    }
+    return true;
+}
+
+/*
+ * page_table_free — 释放页表帧并清除页目录条目
+ * @pd_idx: 页目录索引 (跳过 pd_idx=0)
+ *
+ * 将页表物理帧归还给页帧分配器, 清除 PDE 和 extra_page_tables 引用。
+ */
+static void page_table_free(uint32_t pd_idx)
+{
+    if (pd_idx == 0)
+        return;
+
+    uint32_t pt_phys = page_directory[pd_idx] & 0xFFFFF000;
+    if (pt_phys == 0)
+        return;
+
+    page_directory[pd_idx] = 0;
+    pfa_free_frame(pt_phys);
+
+    if (pd_idx > 0 && pd_idx - 1 < MAX_PAGE_TABLES)
+        extra_page_tables[pd_idx - 1] = NULL;
+}
+
+/*
  * page_map — 将虚拟地址映射到物理地址
  * @vaddr: 虚拟地址 (4KB 对齐)
  * @paddr: 物理地址 (4KB 对齐)
@@ -179,6 +236,13 @@ int page_map(uint32_t vaddr, uint32_t paddr, uint32_t flags)
         pt = (uint32_t *)(page_directory[pd_idx] & 0xFFFFF000);
     }
 
+    /* 检查是否存在旧映射 (潜在泄漏) */
+    if (pt[pt_idx] & PAGE_PRESENT) {
+        uint32_t old_paddr = pt[pt_idx] & 0xFFFFF000;
+        if (old_paddr != (paddr & 0xFFFFF000))
+            serial_puts("[pfa] warning: page_map overwrote mapping\n");
+    }
+
     /* 设置页表条目 */
     pt[pt_idx] = (paddr & 0xFFFFF000) | (flags & 0xFFF) | PAGE_PRESENT;
 
@@ -193,7 +257,8 @@ int page_map(uint32_t vaddr, uint32_t paddr, uint32_t flags)
  * @vaddr: 虚拟地址 (4KB 对齐)
  *
  * 清除页表条目并刷新 TLB。
- * 不释放物理页帧 (调用者需自行管理)。
+ * 如果页表变空则释放页表帧。
+ * 不释放被映射的物理页帧 (调用者需自行管理)。
  */
 void page_unmap(uint32_t vaddr)
 {
@@ -201,29 +266,67 @@ void page_unmap(uint32_t vaddr)
     uint32_t pt_idx = (vaddr >> 12) & 0x3FF;
     uint32_t *pt;
 
-    /* 对齐检查 */
     if (vaddr & 0xFFF)
         return;
-
     if (pd_idx >= 1024)
         return;
-
-    /* 页目录条目不存在则无需取消映射 */
     if (!(page_directory[pd_idx] & PAGE_PRESENT))
         return;
 
-    /* 获取页表地址 */
-    if (pd_idx == 0) {
+    if (pd_idx == 0)
         pt = page_table_0;
-    } else {
+    else
         pt = (uint32_t *)(page_directory[pd_idx] & 0xFFFFF000);
-    }
 
-    /* 清除页表条目 */
     if (pt[pt_idx] & PAGE_PRESENT) {
         pt[pt_idx] = 0;
         tlb_flush_page(vaddr);
     }
+
+    /* 页表全空时释放帧 */
+    if (page_table_is_empty(pd_idx))
+        page_table_free(pd_idx);
+}
+
+/*
+ * page_unmap_and_free — 取消虚拟地址的映射并释放物理页帧
+ * @vaddr: 虚拟地址 (4KB 对齐)
+ *
+ * 清除页表条目, 刷新 TLB, 并将对应的物理页帧归还给页帧分配器。
+ * 如果页表变空则释放页表帧。
+ * 注意: 仅用于动态映射的页面, 不可用于 identity-map 的内核区。
+ */
+void page_unmap_and_free(uint32_t vaddr)
+{
+    uint32_t pd_idx = vaddr >> 22;
+    uint32_t pt_idx = (vaddr >> 12) & 0x3FF;
+    uint32_t *pt;
+    uint32_t paddr;
+
+    if (vaddr & 0xFFF)
+        return;
+    if (pd_idx >= 1024)
+        return;
+    if (!(page_directory[pd_idx] & PAGE_PRESENT))
+        return;
+
+    if (pd_idx == 0)
+        pt = page_table_0;
+    else
+        pt = (uint32_t *)(page_directory[pd_idx] & 0xFFFFF000);
+
+    if (!(pt[pt_idx] & PAGE_PRESENT))
+        return;
+
+    paddr = pt[pt_idx] & 0xFFFFF000;
+    pt[pt_idx] = 0;
+    tlb_flush_page(vaddr);
+
+    pfa_free_frame(paddr);
+
+    /* 页表全空时释放帧 */
+    if (page_table_is_empty(pd_idx))
+        page_table_free(pd_idx);
 }
 
 /*

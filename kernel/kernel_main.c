@@ -27,9 +27,35 @@
 #include <plexsdos/paging.h>
 #include <plexsdos/drive.h>
 #include <plexsdos/installer.h>
+#include <plexsdos/hal.h>
+#include <plexsdos/scheduler.h>
+#include <plexsdos/users.h>
+#include <plexsdos/isa.h>
+#include <plexsdos/mouse.h>
+#include <plexsdos/ahci.h>
 
 /* 启动驱动器号 (由 kernel_entry.S 从 BIOS DL 寄存器保存) */
 extern uint8_t boot_drive;
+
+/* FDC 块设备操作包装 (去除 drive 参数) */
+static bool fdc0_read(uint32_t lba, uint8_t count, void *buf)
+{
+    return fdc_read_lba(0, lba, count, buf);
+}
+static bool fdc1_read(uint32_t lba, uint8_t count, void *buf)
+{
+    return fdc_read_lba(1, lba, count, buf);
+}
+
+/* AHCI 磁盘操作包装 */
+static bool ahci_read_wrap(uint32_t lba, uint8_t count, void *buf)
+{
+    return ahci_read_sectors(0, (uint64_t)lba, count, buf);
+}
+static bool ahci_write_wrap(uint32_t lba, uint8_t count, const void *buf)
+{
+    return ahci_write_sectors(0, (uint64_t)lba, count, buf);
+}
 
 /*
  * vga_dbg — 直接写 VGA 文本缓冲区用于调试
@@ -61,10 +87,13 @@ static void vga_dbg(int pos, char c)
  * 9.  PCI / 磁盘 / FAT32 / CD-ROM
  * 10. C++ 中断管理器 (INT 0x22 系统调用, DPL=3)
  * 11. 启动 Shell
+ *
+ * 每个初始化步骤均输出带颜色标记的启动信息,
+ * 为启动过程营造清晰的仪式感。
  */
 void kernel_main(void)
 {
-    /* 早期 VGA 调试: 在 screen_init 清屏前写入, 确认内核入口到达 */
+    /* ---- 早期 VGA 调试标记 (screen_init 前可见) ---- */
     vga_dbg(0, 'E');
     vga_dbg(1, 'N');
     vga_dbg(2, 'T');
@@ -73,86 +102,321 @@ void kernel_main(void)
 
     serial_puts("[PlexsDOS] kernel_main entered.\n");
 
-    /* 初始化屏幕驱动 (VGA 文本模式) */
+    /* ---- 启动横幅 ---- */
     screen_init();
     vga_dbg(0, 'S');
     serial_puts("[PlexsDOS] screen OK.\n");
 
-    /* 初始化 CPU 特性 (SSE/MMX) */
+    screen_set_color(0x03, 0x00);  /* 青色 */
+    screen_puts("\n");
+    screen_puts("  ============================================\n");
+    screen_puts("        Nexsteaduser PlexsDOS  v0.1\n");
+    screen_puts("        x86 32-bit  Protected Mode OS\n");
+    screen_puts("  ============================================\n");
+    screen_set_color(0x07, 0x00);
+    serial_puts("[PlexsDOS] system started.\n");
+
+    /* ---- CPU 初始化 ---- */
     cpu_init();
     vga_dbg(1, 'C');
     serial_puts("[PlexsDOS] CPU OK.\n");
+    screen_set_color(0x0A, 0x00);  /* 绿色 OK */
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" CPU initialized");
+    /* 读取 CPU 厂商字符串 (从 GDT 加载后的区域) */
+    {
+        char vendor[13];
+        uint32_t *vp = (uint32_t *)vendor;
+        __asm__ __volatile__("xor %%eax, %%eax; cpuid"
+            : "=b"(vp[0]), "=c"(vp[2]), "=d"(vp[1]) : "a"(0));
+        vendor[12] = '\0';
+        screen_puts(" (");
+        screen_puts(vendor);
+        screen_puts(")");
+    }
+    screen_putchar('\n');
 
-    /* 初始化 GDT (Ring 0-3 段描述符 + TSS) */
+    /* ---- GDT ---- */
     gdt_init();
     vga_dbg(2, 'G');
     serial_puts("[PlexsDOS] GDT OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" GDT loaded (Ring 0-3 segments)\n");
 
-    /* 初始化分页 (页目录/页表, 身份映射, 启用 CR0.PG) */
+    /* ---- 分页 ---- */
     paging_init();
     vga_dbg(3, 'P');
     serial_puts("[PlexsDOS] paging OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" Paging enabled (4KB pages)\n");
 
-    /* 初始化中断描述符表 (IDT) + 重映射 PIC */
+    /* ---- IDT + PIC ---- */
     idt_init();
     vga_dbg(4, 'I');
     serial_puts("[PlexsDOS] IDT OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" IDT initialized (256 vectors)\n");
 
-    /* 注册 CPU 异常处理程序 (红屏 RSOD) */
+    /* ---- 异常处理 ---- */
     panic_init();
     vga_dbg(5, 'X');
     serial_puts("[PlexsDOS] panic OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" Exception handlers installed\n");
 
-    /* 初始化键盘驱动 (注册 INT 0x21 处理程序) */
+    /* ---- 键盘 ---- */
     keyboard_init();
     vga_dbg(6, 'K');
     serial_puts("[PlexsDOS] keyboard OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" PS/2 keyboard ready\n");
 
-    /* 重新启用中断 (引导扇区在进入保护模式前执行了 cli) */
+    /* ---- 鼠标 ---- */
+    mouse_init();
+    vga_dbg(7, 'M');
+    serial_puts("[PlexsDOS] mouse OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" PS/2 mouse ready\n");
+
+    /* ---- 启用中断 ---- */
     __asm__ __volatile__("sti");
-    vga_dbg(7, 'T');
+    vga_dbg(8, 'T');
     serial_puts("[PlexsDOS] sti OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" Interrupts enabled\n");
 
-    /* 初始化 PCI 总线 (查找 IDE 控制器, 启用 DMA) */
+    /* ---- PCI ---- */
     pci_init();
-    vga_dbg(8, 'B');
+    vga_dbg(9, 'B');
     serial_puts("[PlexsDOS] PCI OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" PCI bus enumerated\n");
 
-    /* 初始化驱动器子系统 */
-    drive_init();
-    vga_dbg(9, 'D');
-
-    /* 初始化磁盘驱动 (ATA PIO + DMA) */
-    if (disk_init()) {
-        vga_dbg(10, 'd');
-        serial_puts("[PlexsDOS] disk OK.\n");
-        if (fat32_init()) {
-            serial_puts("[PlexsDOS] FAT32 OK.\n");
-            drive_register(DRIVE_LETTER_C, DRIVE_TYPE_HDD, 0, 2048);
+    /* ---- AHCI SATA ---- */
+    {
+        int ahci_ok = ahci_init();
+        if (ahci_ok) {
+            disk_set_override(ahci_read_wrap, ahci_write_wrap);
+            serial_puts("[PlexsDOS] AHCI SATA OK.\n");
+            screen_set_color(0x0A, 0x00);
+            screen_puts("  [OK]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" AHCI SATA controller ready\n");
         } else {
-            serial_puts("[PlexsDOS] FAT32 FAIL.\n");
+            serial_puts("[PlexsDOS] no AHCI.\n");
+            screen_set_color(0x0E, 0x00);
+            screen_puts("  [--]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" No AHCI controller (fallback to ATA)\n");
         }
-    } else {
-        serial_puts("[PlexsDOS] no disk.\n");
     }
 
-    /* 初始化 CD-ROM (ATAPI) */
+    /* ---- 驱动器子系统 ---- */
+    drive_init();
+    vga_dbg(10, 'D');
+
+    /* ---- FDC (软盘控制器) ---- */
+    if (fdc_init()) {
+        serial_puts("[PlexsDOS] FDC OK.\n");
+        drive_register(DRIVE_LETTER_A, DRIVE_TYPE_FLOPPY, 0, 0);
+        drive_register(DRIVE_LETTER_B, DRIVE_TYPE_FLOPPY, 1, 0);
+        screen_set_color(0x0A, 0x00);
+        screen_puts("  [OK]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" Floppy controller ready (A: B:)\n");
+    } else {
+        serial_puts("[PlexsDOS] no FDC.\n");
+        screen_set_color(0x0E, 0x00);
+        screen_puts("  [--]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" No floppy controller\n");
+    }
+
+    /* ---- ATA/AHCI 磁盘 + FAT32 ---- */
+    {
+        int disk_ok = 0;
+
+        if (disk_read_override_active()) {
+            disk_ok = 1;
+            serial_puts("[PlexsDOS] disk I/O via AHCI.\n");
+        } else if (disk_init()) {
+            disk_ok = 1;
+        }
+
+        if (disk_ok) {
+            vga_dbg(11, 'd');
+            screen_set_color(0x0A, 0x00);
+            screen_puts("  [OK]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" ATA/ATAPI disk detected\n");
+
+            if (fat32_init()) {
+                serial_puts("[PlexsDOS] FAT32 OK.\n");
+                drive_register(DRIVE_LETTER_C, DRIVE_TYPE_HDD, 0, 2048);
+                screen_set_color(0x0A, 0x00);
+                screen_puts("  [OK]");
+                screen_set_color(0x07, 0x00);
+                screen_puts(" FAT32 filesystem mounted (C:)\n");
+            } else {
+                serial_puts("[PlexsDOS] FAT32 FAIL.\n");
+                screen_set_color(0x0C, 0x00);
+                screen_puts("  [!!]");
+                screen_set_color(0x07, 0x00);
+                screen_puts(" FAT32 mount failed\n");
+            }
+
+            /* MBR 分区扫描 */
+            {
+                uint8_t mbr[512];
+                if (disk_read_sectors(0, 1, mbr) && mbr[510] == 0x55 && mbr[511] == 0xAA) {
+                    int next_drive = DRIVE_LETTER_E;
+                    int extra_count = 0;
+                    for (int part_idx = 0; part_idx < 4 && next_drive < DRIVE_MAX; part_idx++) {
+                        uint8_t *entry = mbr + 0x1BE + part_idx * 16;
+                        uint8_t part_type = entry[4];
+                        uint32_t part_lba = *(uint32_t *)(entry + 8);
+
+                        if (part_type != 0x00 && part_lba != 0) {
+                            if (part_type == 0x0B || part_type == 0x0C ||
+                                part_type == 0x01 || part_type == 0x04 ||
+                                part_type == 0x06 || part_type == 0x0E) {
+                                if (part_lba != 2048 && next_drive < DRIVE_MAX) {
+                                    drive_register(next_drive++, DRIVE_TYPE_HDD, 0, part_lba);
+                                    extra_count++;
+                                }
+                            }
+                        }
+                    }
+                    if (extra_count > 0) {
+                        serial_puts("[PlexsDOS] extra partitions registered.\n");
+                        screen_set_color(0x0A, 0x00);
+                        screen_puts("  [OK]");
+                        screen_set_color(0x07, 0x00);
+                        screen_puts(" Extra partitions scanned\n");
+                    }
+                }
+            }
+        } else {
+            serial_puts("[PlexsDOS] no disk.\n");
+            screen_set_color(0x0E, 0x00);
+            screen_puts("  [--]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" No disk drive found\n");
+        }
+    }
+
+    /* ---- CD-ROM ---- */
     if (cdrom_init()) {
-        vga_dbg(11, 'R');
+        vga_dbg(12, 'R');
         serial_puts("[PlexsDOS] CD-ROM OK.\n");
         drive_register(DRIVE_LETTER_D, DRIVE_TYPE_CDROM, 0, 0);
+        screen_set_color(0x0A, 0x00);
+        screen_puts("  [OK]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" CD-ROM drive ready (D:)\n");
         if (iso9660_mount()) {
             serial_puts("[PlexsDOS] ISO9660 OK.\n");
+            screen_set_color(0x0A, 0x00);
+            screen_puts("  [OK]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" ISO 9660 filesystem mounted\n");
         }
+    } else {
+        screen_set_color(0x0E, 0x00);
+        screen_puts("  [--]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" No CD-ROM drive\n");
     }
 
-    /* 初始化 C++ 中断管理器 (INT 21h 系统调用) */
+    /* ---- C++ 中断管理器 + 系统调用 ---- */
     interrupt_manager_init();
-    vga_dbg(12, 'M');
+    vga_dbg(13, 'M');
     serial_puts("[PlexsDOS] INT OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" System call handler ready (INT 0x22)\n");
 
-    vga_dbg(13, '!');
-    serial_puts("[PlexsDOS] ready.\n");
+    /* ===== HAL 块设备注册 ===== */
+    {
+        static struct hal_blkdev_ops fdc0_ops;
+        fdc0_ops.read  = fdc0_read;
+        fdc0_ops.write = NULL;
+        hal_blkdev_register(HAL_BLKDEV_FLOPPY, 0, &fdc0_ops);
+    }
+    {
+        static struct hal_blkdev_ops fdc1_ops;
+        fdc1_ops.read  = fdc1_read;
+        fdc1_ops.write = NULL;
+        hal_blkdev_register(HAL_BLKDEV_FLOPPY, 1, &fdc1_ops);
+    }
+
+    /* ATA 块设备操作 */
+    {
+        static struct hal_blkdev_ops ata_ops;
+        ata_ops.read  = disk_read_sectors;
+        ata_ops.write = disk_write_sectors;
+        hal_blkdev_register(HAL_BLKDEV_ATA, 0, &ata_ops);
+    }
+
+    serial_puts("[PlexsDOS] HAL block devices registered.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" HAL block device layer ready\n");
+
+    /* ===== ISA 传统设备枚举 ===== */
+    isa_init();
+    serial_puts("[PlexsDOS] ISA devices enumerated.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" ISA legacy devices enumerated\n");
+
+    /* ===== 进程调度器初始化 ===== */
+    sched_init();
+    vga_dbg(14, 'S');
+    serial_puts("[PlexsDOS] scheduler OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" Process scheduler initialized\n");
+
+    /* ===== 用户系统初始化 ===== */
+    users_init();
+    serial_puts("[PlexsDOS] users OK.\n");
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" User accounts subsystem ready\n");
+
+    /* ---- 启动完成横幅 ---- */
+    vga_dbg(15, '!');
+    serial_puts("[PlexsDOS] system ready.\n");
+    screen_set_color(0x03, 0x00);
+    screen_puts("\n");
+    screen_puts("  ============================================\n");
+    screen_puts("       Nexsteaduser PlexsDOS  System Ready\n");
+    screen_puts("  ============================================\n");
+    screen_set_color(0x07, 0x00);
+    screen_putchar('\n');
 
     /*
      * 安装介质检测: 根据启动驱动器号决定是否进入安装模式
@@ -163,14 +427,49 @@ void kernel_main(void)
      * 该值由 BIOS 设置, 经 MBR → VBR 传递至此。
      */
     if (boot_drive < 0x80) {
+        serial_puts("[PlexsDOS] boot source: floppy/CD (DL < 0x80).\n");
+        screen_set_color(0x0E, 0x00);
+        screen_puts("  [II]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" Boot source: removable media\n");
+#if defined(MINIMAL_KERNEL) || defined(DEBUG_SKIP_INSTALLER)
+        serial_puts("[PlexsDOS] boot from floppy/CD, entering shell (debug mode)...\n");
+        screen_set_color(0x0E, 0x00);
+        screen_puts("  [II]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" Installer bypassed (debug), launching shell...\n");
+        shell_main();
+#else
         serial_puts("[PlexsDOS] boot from floppy/CD, starting installer...\n");
+        screen_set_color(0x0E, 0x00);
+        screen_puts("  [II]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" Installation mode activated\n");
         installer_run();
         /* 安装程序返回后停机 — 用户已被告知移除介质并重启 */
         serial_puts("[PlexsDOS] installer finished, halting.\n");
+        screen_set_color(0x0C, 0x00);
+        screen_puts("  [!!]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" Installation complete — remove media and reboot\n");
         for (;;)
             __asm__ __volatile__("cli; hlt");
+#endif
+    } else {
+        serial_puts("[PlexsDOS] boot source: hard disk (DL >= 0x80).\n");
+        screen_set_color(0x0A, 0x00);
+        screen_puts("  [OK]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" Boot source: hard disk\n");
     }
 
     /* 正常启动 Shell */
+    screen_set_color(0x03, 0x00);
+    screen_puts("\n");
+    screen_puts("  ============================================\n");
+    screen_puts("       Welcome to Nexsteaduser PlexsDOS\n");
+    screen_puts("  ============================================\n");
+    screen_set_color(0x07, 0x00);
+    screen_putchar('\n');
     shell_main();
 }

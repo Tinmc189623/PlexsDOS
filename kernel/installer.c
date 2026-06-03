@@ -24,6 +24,7 @@
 #include <plexsdos/fdc.h>
 #include <plexsdos/fat12.h>
 #include <plexsdos/fat32.h>
+#include <plexsdos/serial.h>
 
 /* 安装分区参数 */
 #define PART_START_LBA   2048       /* 分区起始 (1MB 偏移) */
@@ -351,18 +352,51 @@ static void inst_print_banner(void)
  * inst_confirm — 确认安装
  * 返回: true = 用户确认, false = 取消。
  */
+/*
+ * inst_flush_serial — 清空串口接收缓冲
+ *
+ * 读取并丢弃串口接收 FIFO 中所有残留字节。
+ * 防止终端初始化时产生的杂散字符被误认为用户输入。
+ */
+static void inst_flush_serial(void)
+{
+    while (serial_available())
+        serial_getchar();
+}
+
+/*
+ * inst_confirm — 确认安装 (循环等待明确输入)
+ * 返回: true = 用户按 Y, false = 用户按 N 或 ESC。
+ *
+ * 在等待输入前先刷新串口 FIFO, 排除终端启动时的杂散字节。
+ * 只接受 Y(继续) 或 N/ESC(取消), 其他按键重新提示。
+ */
 static bool inst_confirm(void)
 {
     screen_set_color(0x0C, 0x00);
     screen_puts("WARNING: This will ERASE all data on the hard disk!\n");
     screen_set_color(0x07, 0x00);
-    screen_puts("Continue? (Y/N): ");
 
-    char c = keyboard_getchar();
-    screen_putchar(c);
-    screen_putchar('\n');
+    /* 清除串口缓冲中的任何残留字节 */
+    inst_flush_serial();
 
-    return (c == 'y' || c == 'Y');
+    for (;;) {
+        screen_puts("Continue? (Y/N): ");
+
+        char c = keyboard_getchar();
+
+        /* 换行显示用户输入 */
+        screen_putchar(c);
+        screen_putchar('\n');
+
+        if (c == 'y' || c == 'Y')
+            return true;
+        if (c == 'n' || c == 'N' || c == 0x1B)  /* N 或 ESC = 取消 */
+            return false;
+
+        /* 其他按键: 忽略并重新提示 */
+        screen_puts("Please press Y (Yes) or N (No).\n");
+    }
 }
 
 /* ==================== 安装盘描述 ==================== */

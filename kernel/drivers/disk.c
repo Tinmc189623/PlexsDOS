@@ -57,6 +57,10 @@ static inline void outl(uint16_t port, uint32_t val)
 /* 当前传输模式 */
 static uint8_t current_mode = DMA_MODE_PIO;
 
+/* 读写函数覆盖 (由 AHCI 等驱动设置) */
+static bool (*disk_read_override)(uint32_t lba, uint8_t count, void *buf) = NULL;
+static bool (*disk_write_override)(uint32_t lba, uint8_t count, const void *buf) = NULL;
+
 /* Bus Master 基址 (从 PCI BAR4 获取) */
 static uint16_t bm_base = 0;
 
@@ -154,6 +158,25 @@ bool disk_init(void)
     }
 
     return true;
+}
+
+/*
+ * disk_set_override — 设置磁盘读写函数覆盖
+ */
+void disk_set_override(
+    bool (*read_fn)(uint32_t lba, uint8_t count, void *buf),
+    bool (*write_fn)(uint32_t lba, uint8_t count, const void *buf))
+{
+    disk_read_override = read_fn;
+    disk_write_override = write_fn;
+}
+
+/*
+ * disk_read_override_active — 检查磁盘读写是否已被覆盖
+ */
+int disk_read_override_active(void)
+{
+    return (disk_read_override != NULL) ? 1 : 0;
 }
 
 /*
@@ -316,6 +339,9 @@ static bool disk_read_dma(uint32_t lba, uint8_t count, void *buf)
  */
 bool disk_read_sectors(uint32_t lba, uint8_t count, void *buf)
 {
+    if (disk_read_override)
+        return disk_read_override(lba, count, buf);
+
     if (current_mode == DMA_MODE_DMA && dma_ready) {
         return disk_read_dma(lba, count, buf);
     }
@@ -374,5 +400,8 @@ static bool disk_write_pio(uint32_t lba, uint8_t count, const void *buf)
  */
 bool disk_write_sectors(uint32_t lba, uint8_t count, const void *buf)
 {
+    if (disk_write_override)
+        return disk_write_override(lba, count, buf);
+
     return disk_write_pio(lba, count, buf);
 }

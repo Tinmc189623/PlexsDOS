@@ -114,6 +114,11 @@ load_done:
 switch_to_pm:
     cli                     /* 关中断 */
 
+    /* 开启 A20 (快速方法, 端口 0x92) — VMware/实机需要 */
+    in   $0x92, %al
+    or   $2, %al
+    out  %al, $0x92
+
     /*
      * 手动编码保护模式切换指令:
      * GAS 在 16-bit 模式下无法正确生成 0x66 操作数大小前缀,

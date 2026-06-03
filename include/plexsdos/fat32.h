@@ -97,6 +97,37 @@ uint32_t fat32_load_file(struct fat32_dir_entry *entry, uint32_t load_addr);
  */
 bool fat32_write_file(const char *name, const uint8_t *data, uint32_t size);
 
+/*
+ * fat32_delete_file — 删除 FAT32 文件
+ * @name: 文件名
+ * 返回: true = 成功。
+ */
+bool fat32_delete_file(const char *name);
+
+/*
+ * fat32_rename_file — 重命名 FAT32 文件
+ * @old_name: 原文件名
+ * @new_name: 新文件名
+ * 返回: true = 成功。
+ */
+bool fat32_rename_file(const char *old_name, const char *new_name);
+
+/*
+ * fat32_create_dir — 在根目录下创建子目录
+ * @name: 目录名
+ * 返回: true = 成功, false = 失败。
+ */
+bool fat32_create_dir(const char *name);
+
+/*
+ * fat32_format — 格式化 FAT32 分区
+ * @partition_lba: 分区起始 LBA 扇区号
+ *
+ * 重新初始化 FAT 表、FSINFO 和根目录簇。
+ * 返回: true = 成功, false = 失败。
+ */
+bool fat32_format(uint32_t partition_lba);
+
 #ifdef __cplusplus
 }
 #endif

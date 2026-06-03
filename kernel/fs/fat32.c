@@ -17,6 +17,7 @@
 #include <plexsdos/fat32.h>
 #include <plexsdos/disk.h>
 #include <plexsdos/screen.h>
+#include <plexsdos/string.h>
 
 /* FAT32 BPB 参数 (从引导扇区 0x7C00 复制) */
 static uint16_t bpb_bytes_per_sec;    /* 每扇区字节数 */
@@ -656,6 +657,391 @@ bool fat32_write_file(const char *name, const uint8_t *data, uint32_t size)
         cluster = fat32_get_next_cluster(cluster);
     }
 
+    screen_puts("[fat32] Root directory full\n");
+    return false;
+}
+
+/*
+ * fat32_free_cluster_chain — 释放 FAT32 簇链
+ * @cluster: 起始簇号
+ *
+ * 遍历簇链并将所有簇标记为空闲 (0)。
+ */
+static void fat32_free_cluster_chain(uint32_t cluster)
+{
+    while (cluster >= 2 && cluster < FAT32_MAX_CLUSTER) {
+        uint32_t next = fat32_get_next_cluster(cluster);
+        fat32_update_fat(cluster, 0);
+        cluster = next;
+    }
+}
+
+/*
+ * fat32_delete_file — 删除 FAT32 文件
+ * @name: 文件名
+ *
+ * 遍历根目录簇链查找文件, 释放簇链, 标记目录项已删除。
+ * 返回: true = 成功。
+ */
+bool fat32_delete_file(const char *name)
+{
+    char name83[11];
+    uint32_t cluster = bpb_root_cluster;
+
+    convert_to_83(name, name83);
+
+    while (cluster >= 2 && cluster < FAT32_MAX_CLUSTER) {
+        uint32_t lba = fat32_get_cluster_lba(cluster);
+
+        for (uint8_t s = 0; s < bpb_sec_per_clust; s++) {
+            if (!read_sector(lba + s))
+                return false;
+
+            struct fat32_dir_entry *entries =
+                (struct fat32_dir_entry *)sector_buf;
+
+            for (int i = 0; i < 16; i++) {
+                uint8_t first = entries[i].name[0];
+
+                if (first == 0x00)
+                    return false;  /* 到达目录末尾, 文件不存在 */
+                if (first == 0xE5)
+                    continue;
+                if (entries[i].attr == FAT32_ATTR_LFN)
+                    continue;
+                if (entries[i].attr & FAT32_ATTR_VOLUME_ID)
+                    continue;
+
+                if (fat32_name_cmp(entries[i].name,
+                                   (uint8_t *)name83) == 0) {
+                    /* 找到文件, 释放簇链 */
+                    uint32_t file_cluster =
+                        ((uint32_t)entries[i].cluster_hi << 16)
+                        | entries[i].cluster_lo;
+                    if (file_cluster >= 2
+                        && file_cluster < FAT32_CLUSTER_BAD) {
+                        fat32_free_cluster_chain(file_cluster);
+                    }
+
+                    /* 标记目录项为已删除 */
+                    entries[i].name[0] = 0xE5;
+
+                    /* 写回扇区 */
+                    if (!disk_write_sectors(lba + s, 1, sector_buf))
+                        return false;
+
+                    screen_puts("[fat32] File deleted: ");
+                    screen_puts(name);
+                    screen_putchar('\n');
+                    return true;
+                }
+            }
+        }
+
+        cluster = fat32_get_next_cluster(cluster);
+    }
+
+    return false;
+}
+
+/*
+ * fat32_rename_file — 重命名 FAT32 文件
+ * @old_name: 原文件名
+ * @new_name: 新文件名
+ *
+ * 遍历根目录簇链, 更新目录项中的文件名。
+ * 返回: true = 成功。
+ */
+bool fat32_rename_file(const char *old_name, const char *new_name)
+{
+    char old_name83[11];
+    char new_name83[11];
+    uint32_t cluster = bpb_root_cluster;
+
+    convert_to_83(old_name, old_name83);
+    convert_to_83(new_name, new_name83);
+
+    while (cluster >= 2 && cluster < FAT32_MAX_CLUSTER) {
+        uint32_t lba = fat32_get_cluster_lba(cluster);
+
+        for (uint8_t s = 0; s < bpb_sec_per_clust; s++) {
+            if (!read_sector(lba + s))
+                return false;
+
+            struct fat32_dir_entry *entries =
+                (struct fat32_dir_entry *)sector_buf;
+
+            for (int i = 0; i < 16; i++) {
+                uint8_t first = entries[i].name[0];
+
+                if (first == 0x00)
+                    return false;
+                if (first == 0xE5)
+                    continue;
+                if (entries[i].attr == FAT32_ATTR_LFN)
+                    continue;
+                if (entries[i].attr & FAT32_ATTR_VOLUME_ID)
+                    continue;
+
+                if (fat32_name_cmp(entries[i].name,
+                                   (uint8_t *)old_name83) == 0) {
+                    /* 更新文件名 */
+                    for (int j = 0; j < 11; j++)
+                        entries[i].name[j] = new_name83[j];
+
+                    /* 写回扇区 */
+                }
+            }
+        }
+
+        cluster = fat32_get_next_cluster(cluster);
+    }
+
+    return false;
+}
+
+/*
+ * fat32_format — 格式化 FAT32 分区
+ * @partition_lba: 分区起始 LBA 扇区号
+ *
+ * 读取当前 BPB 参数, 重新初始化 FAT 表、
+ * FSINFO 和根目录簇, 清空所有文件数据。
+ * 返回: true = 成功, false = 失败。
+ */
+bool fat32_format(uint32_t partition_lba)
+{
+    /* 读取当前引导扇区以获得 BPB 参数 */
+    if (!disk_read_sectors(partition_lba, 1, sector_buf)) {
+        screen_puts("[fat32] Cannot read boot sector\n");
+        return false;
+    }
+
+    /* 验证引导签名 */
+    if (*(uint16_t *)(sector_buf + 510) != 0xAA55) {
+        screen_puts("[fat32] Invalid boot signature\n");
+        return false;
+    }
+
+    /* 提取 BPB 参数 */
+    uint16_t bytes_per_sec = *(uint16_t *)(sector_buf + 11);
+    uint8_t  sec_per_clust = *(uint8_t  *)(sector_buf + 13);
+    uint16_t reserved_secs = *(uint16_t *)(sector_buf + 14);
+    uint8_t  num_fats      = *(uint8_t  *)(sector_buf + 16);
+    uint32_t total_secs    = *(uint32_t *)(sector_buf + 32);
+    uint32_t fat_size      = *(uint32_t *)(sector_buf + 36);
+    uint32_t root_cluster  = *(uint32_t *)(sector_buf + 44);
+    uint16_t fs_info_sec   = *(uint16_t *)(sector_buf + 48);
+    (void)total_secs;
+
+    if (bytes_per_sec != 512) {
+        screen_puts("[fat32] Unsupported bytes per sector\n");
+        return false;
+    }
+
+    uint32_t fat1_lba = partition_lba + reserved_secs;
+    uint32_t fat2_lba = fat1_lba + fat_size;
+    uint32_t data_lba = partition_lba + reserved_secs
+                        + ((uint32_t)num_fats * fat_size);
+
+    screen_puts("[fat32] Formatting...\n");
+
+    /* === Step 1: Write FSINFO === */
+    if (fs_info_sec > 0 && fs_info_sec < reserved_secs) {
+        memset(sector_buf, 0, 512);
+        *(uint32_t *)(sector_buf + 0)   = 0x41615252;  /* "RRaA" */
+        *(uint32_t *)(sector_buf + 484) = 0x61417272;  /* "rrAa" */
+        *(uint32_t *)(sector_buf + 488) = 0xFFFFFFFF;  /* 空闲簇数未知 */
+        *(uint32_t *)(sector_buf + 492) = 0xFFFFFFFF;  /* 下一个空闲簇未知 */
+        *(uint16_t *)(sector_buf + 510) = 0xAA55;
+
+        if (!disk_write_sectors(partition_lba + fs_info_sec, 1, sector_buf)) {
+            screen_puts("[fat32] Failed to write FSINFO\n");
+            return false;
+        }
+    }
+
+    /* === Step 2: Write FAT1 === */
+    memset(sector_buf, 0, 512);
+    *(uint32_t *)(sector_buf + 0) = 0x0FFFFFF8;  /* 条目 0: 介质描述 */
+    *(uint32_t *)(sector_buf + 4) = 0x0FFFFFFF;  /* 条目 1: 保留 */
+    *(uint32_t *)(sector_buf + 8) = 0x0FFFFFFF;  /* 条目 2: 根目录 EOC */
+
+    if (!disk_write_sectors(fat1_lba, 1, sector_buf)) {
+        screen_puts("[fat32] Failed to write FAT1 (first sector)\n");
+        return false;
+    }
+
+    memset(sector_buf, 0, 512);
+    for (uint32_t i = 1; i < fat_size; i++) {
+        if (!disk_write_sectors(fat1_lba + i, 1, sector_buf)) {
+            screen_puts("[fat32] Failed to write FAT1\n");
+            return false;
+        }
+    }
+
+    /* === Step 3: Write FAT2 (镜像) === */
+    memset(sector_buf, 0, 512);
+    *(uint32_t *)(sector_buf + 0) = 0x0FFFFFF8;
+    *(uint32_t *)(sector_buf + 4) = 0x0FFFFFFF;
+    *(uint32_t *)(sector_buf + 8) = 0x0FFFFFFF;
+
+    if (!disk_write_sectors(fat2_lba, 1, sector_buf)) {
+        screen_puts("[fat32] Failed to write FAT2 (first sector)\n");
+        return false;
+    }
+
+    memset(sector_buf, 0, 512);
+    for (uint32_t i = 1; i < fat_size; i++) {
+        if (!disk_write_sectors(fat2_lba + i, 1, sector_buf)) {
+            screen_puts("[fat32] Failed to write FAT2\n");
+            return false;
+        }
+    }
+
+    /* === Step 4: 清空根目录簇 === */
+    uint32_t root_lba = data_lba + (root_cluster - 2) * sec_per_clust;
+    memset(sector_buf, 0, 512);
+    for (uint8_t i = 0; i < sec_per_clust; i++) {
+        if (!disk_write_sectors(root_lba + i, 1, sector_buf)) {
+            screen_puts("[fat32] Failed to clear root directory\n");
+            return false;
+        }
+    }
+
+    screen_puts("[fat32] Format complete.\n");
+    return true;
+}
+
+/*
+ * fat32_create_dir — 在根目录下创建子目录
+ * @name: 目录名 (普通格式, 如 "SUBDIR")
+ *
+ * 流程:
+ * 1. 检查是否已存在同名文件/目录
+ * 2. 分配一个新簇用于存储目录内容
+ * 3. 在新簇中初始化 "." (自身) 和 ".." (父目录) 条目
+ * 4. 在根目录中创建对应的目录项 (ATTR_DIRECTORY)
+ * 返回: true = 成功, false = 失败。
+ */
+bool fat32_create_dir(const char *name)
+{
+    char name83[11];
+    uint32_t new_cluster;
+
+    convert_to_83(name, name83);
+
+    /* 检查是否已存在同名文件或目录 */
+    uint32_t cluster = bpb_root_cluster;
+    while (cluster >= 2 && cluster < FAT32_MAX_CLUSTER) {
+        uint32_t lba = fat32_get_cluster_lba(cluster);
+        for (uint8_t s = 0; s < bpb_sec_per_clust; s++) {
+            if (!read_sector(lba + s)) return false;
+            struct fat32_dir_entry *entries =
+                (struct fat32_dir_entry *)sector_buf;
+            for (int i = 0; i < 16; i++) {
+                uint8_t first = entries[i].name[0];
+                if (first == 0x00) goto check_done;
+                if (first == 0xE5) continue;
+                if (entries[i].attr == FAT32_ATTR_LFN) continue;
+                if (entries[i].attr & FAT32_ATTR_VOLUME_ID) continue;
+                if (fat32_name_cmp(entries[i].name,
+                                   (uint8_t *)name83) == 0) {
+                    screen_puts("[fat32] Already exists\n");
+                    return false;
+                }
+            }
+        }
+        cluster = fat32_get_next_cluster(cluster);
+    }
+check_done:
+
+    /* 分配新簇 */
+    new_cluster = fat32_alloc_cluster(0);
+    if (new_cluster == 0) {
+        screen_puts("[fat32] No free clusters\n");
+        return false;
+    }
+
+    /* 初始化新目录: 写入 "." 和 ".." 条目 */
+    uint32_t dir_lba = fat32_get_cluster_lba(new_cluster);
+    memset(sector_buf, 0, 512);
+
+    /* 第 0 项: "." = 指向自身 */
+    struct fat32_dir_entry *de = (struct fat32_dir_entry *)sector_buf;
+    memset(de->name, ' ', 11);
+    de->name[0] = '.';
+    de->attr = FAT32_ATTR_DIRECTORY;
+    de->cluster_hi = (uint16_t)(new_cluster >> 16);
+    de->cluster_lo = (uint16_t)(new_cluster & 0xFFFF);
+
+    /* 第 1 项: ".." = 指向父目录 (根目录簇) */
+    de = (struct fat32_dir_entry *)(sector_buf + 32);
+    memset(de->name, ' ', 11);
+    de->name[0] = '.';
+    de->name[1] = '.';
+    de->attr = FAT32_ATTR_DIRECTORY;
+    de->cluster_hi = (uint16_t)(bpb_root_cluster >> 16);
+    de->cluster_lo = (uint16_t)(bpb_root_cluster & 0xFFFF);
+
+    /* 写入第一个扇区 */
+    if (!disk_write_sectors(dir_lba, 1, sector_buf)) {
+        fat32_free_cluster_chain(new_cluster);
+        return false;
+    }
+
+    /* 清零剩余扇区 */
+    memset(sector_buf, 0, 512);
+    for (uint8_t i = 1; i < bpb_sec_per_clust; i++) {
+        if (!disk_write_sectors(dir_lba + i, 1, sector_buf)) {
+            fat32_free_cluster_chain(new_cluster);
+            return false;
+        }
+    }
+
+    /* 在根目录中创建目录项 */
+    cluster = bpb_root_cluster;
+    while (cluster >= 2 && cluster < FAT32_MAX_CLUSTER) {
+        uint32_t lba = fat32_get_cluster_lba(cluster);
+        for (uint8_t s = 0; s < bpb_sec_per_clust; s++) {
+            if (!read_sector(lba + s)) {
+                fat32_free_cluster_chain(new_cluster);
+                return false;
+            }
+            struct fat32_dir_entry *entries =
+                (struct fat32_dir_entry *)sector_buf;
+            for (int i = 0; i < 16; i++) {
+                uint8_t first = entries[i].name[0];
+                if (first == 0x00 || first == 0xE5) {
+                    /* 写入新目录项 */
+                    for (int j = 0; j < 11; j++)
+                        entries[i].name[j] = name83[j];
+                    entries[i].attr = FAT32_ATTR_DIRECTORY;
+                    entries[i].reserved = 0;
+                    entries[i].create_time_ms = 0;
+                    entries[i].create_time = 0;
+                    entries[i].create_date = 0x5621;
+                    entries[i].access_date = 0x5621;
+                    entries[i].cluster_hi =
+                        (uint16_t)(new_cluster >> 16);
+                    entries[i].modify_time = 0;
+                    entries[i].modify_date = 0x5621;
+                    entries[i].cluster_lo =
+                        (uint16_t)(new_cluster & 0xFFFF);
+                    entries[i].file_size = 0;
+
+                    if (!disk_write_sectors(lba + s, 1, sector_buf)) {
+                        fat32_free_cluster_chain(new_cluster);
+                        return false;
+                    }
+                    return true;
+                }
+            }
+        }
+        cluster = fat32_get_next_cluster(cluster);
+    }
+
+    /* 根目录已满 */
+    fat32_free_cluster_chain(new_cluster);
     screen_puts("[fat32] Root directory full\n");
     return false;
 }

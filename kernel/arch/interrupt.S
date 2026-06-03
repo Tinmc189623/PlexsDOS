@@ -15,6 +15,7 @@
 .global _idt_load
 .global _isr_syscall
 .global _isr_fdc
+.global _isr_mouse
 .global _isr_exception_common
 
 /*
@@ -78,6 +79,21 @@ _isr_fdc:
     ISR_SAVE_REGS
     call _fdc_interrupt_handler
     /* EOI 由 C 处理程序发送 */
+    ISR_RESTORE_REGS
+    iret
+
+/*
+ * isr_mouse — PS/2 鼠标中断处理程序 (IRQ12, INT 0x2C)
+ * 调用 C 函数 mouse_interrupt_handler()。
+ * IRQ12 位于从片 (slave PIC), 需向两片发送 EOI。
+ */
+_isr_mouse:
+    ISR_SAVE_REGS
+    call _mouse_interrupt_handler
+    /* EOI: 先从片 (0xA0), 后主片 (0x20) */
+    mov  $0x20, %al
+    out  %al, $0xA0
+    out  %al, $0x20
     ISR_RESTORE_REGS
     iret
 

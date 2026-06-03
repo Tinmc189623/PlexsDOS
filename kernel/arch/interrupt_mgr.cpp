@@ -12,6 +12,8 @@
 #include <plexsdos/keyboard.h>
 #include <plexsdos/serial.h>
 #include <plexsdos/config.h>
+#include <plexsdos/pci.h>
+#include <plexsdos/isa.h>
 
 /* 外部 C 函数 */
 extern "C" {
@@ -54,17 +56,11 @@ InterruptManager &InterruptManager::instance()
 /*
  * InterruptManager::init — 初始化中断管理器
  *
- * 调用 C 层的 idt_init() 完成 PIC 重映射和 IDT 初始化,
- * 然后注册默认中断处理程序。
+ * IDT 和 PIC 已在 kernel_main 中由 idt_init() 完成初始化。
+ * 此处仅需注册需要 C++ 管理器处理的中断。
  */
 void InterruptManager::init()
 {
-    /* 初始化 IDT 和 PIC (C 层) */
-    idt_init();
-
-    /* 注册键盘中断 (IRQ1 → INT 0x21, 仍使用汇编桩) */
-    idt_set_gate(0x21, isr_keyboard);
-
     serial_puts("[InterruptManager] initialized.\n");
 }
 
@@ -198,6 +194,37 @@ uint32_t SyscallDispatcher::dispatch_syscall(uint32_t eax,
         screen_puts("]\n");
         m_exit_flag = true;
         return 1;
+
+    case 0x30: { /* SYS_PNP_PCI_COUNT */
+        return (uint32_t)pci_device_count();
+    }
+
+    case 0x31: { /* SYS_PNP_PCI_GET */
+        int pci_idx = (int)edx;          /* EDX = 设备索引 */
+        struct pci_device *buf = (struct pci_device *)esi;  /* ESI = 缓冲区 */
+        struct pci_device *dev = pci_get_device(pci_idx);
+        if (!dev)
+            return 0xFFFFFFFF;
+        /* 拷贝设备信息到用户缓冲区 (identity-mapped) */
+        for (int i = 0; i < (int)sizeof(struct pci_device); i++)
+            ((uint8_t *)buf)[i] = ((uint8_t *)dev)[i];
+        return 0;
+    }
+
+    case 0x32: { /* SYS_PNP_ISA_COUNT */
+        return (uint32_t)isa_device_count();
+    }
+
+    case 0x33: { /* SYS_PNP_ISA_GET */
+        int isa_idx = (int)edx;          /* EDX = 设备索引 */
+        struct isa_device *buf = (struct isa_device *)esi;  /* ESI = 缓冲区 */
+        struct isa_device *dev = isa_get_device(isa_idx);
+        if (!dev)
+            return 0xFFFFFFFF;
+        for (int i = 0; i < (int)sizeof(struct isa_device); i++)
+            ((uint8_t *)buf)[i] = ((uint8_t *)dev)[i];
+        return 0;
+    }
 
     default:
         screen_puts("[syscall] unknown: 0x");

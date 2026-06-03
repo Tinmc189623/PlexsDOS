@@ -3,17 +3,21 @@
  * PCI 总线接口实现
  * 作者: Tinmc189623 | 团队: Nexlyh
  *
- * 扫描 PCI 总线, 查找 IDE 控制器 (类码 0x01, 子类 0x01)。
- * 启用总线主控 (Bus Master) 以支持 ATA DMA 传输。
+ * 扫描 256 条 PCI 总线 × 32 个设备, 枚举全部 PCI 设备。
+ * 维护全局设备表, 支持按索引查询。
  */
 
 #include <plexsdos/types.h>
 #include <plexsdos/pci.h>
 #include <plexsdos/screen.h>
+#include <plexsdos/serial.h>
 
-/* 找到的 IDE 控制器 */
-static struct pci_device ide_controller;
-static bool ide_found = false;
+/* PCI 设备表 */
+static struct pci_device pci_devices[PCI_MAX_DEVICES];
+static int pci_device_count_val = 0;
+
+/* 找到的 IDE 控制器索引 */
+static int ide_index = -1;
 
 /*
  * pci_read_config_dword — 读取 PCI 配置双字
@@ -121,69 +125,112 @@ void pci_enable_bus_master(struct pci_device *dev)
 }
 
 /*
+ * pci_add_device — 将发现的 PCI 设备加入设备表
+ * @bus:   总线号
+ * @slot:  设备号
+ * @func:  功能号
+ * @vendor: 厂商 ID
+ *
+ * 填充 pci_device 结构并加入静态表。超过 PCI_MAX_DEVICES 时丢弃。
+ */
+static void pci_add_device(uint8_t bus, uint8_t slot, uint8_t func,
+                            uint16_t vendor, uint16_t device,
+                            uint8_t class_code, uint8_t subclass,
+                            uint8_t prog_if)
+{
+    if (pci_device_count_val >= PCI_MAX_DEVICES)
+        return;
+
+    struct pci_device *dev = &pci_devices[pci_device_count_val++];
+    dev->bus        = bus;
+    dev->slot       = slot;
+    dev->func       = func;
+    dev->vendor_id  = vendor;
+    dev->device_id  = device;
+    dev->class_code = class_code;
+    dev->subclass   = subclass;
+    dev->prog_if    = prog_if;
+
+    if (func == 0) {
+        dev->bar0 = pci_read_config_dword(bus, slot, func, PCI_BAR0);
+        dev->bar4 = pci_read_config_dword(bus, slot, func, PCI_BAR4);
+        dev->irq  = pci_read_config_byte(bus, slot, func, PCI_INTERRUPT_LINE);
+    } else {
+        dev->bar0 = 0;
+        dev->bar4 = 0;
+        dev->irq  = 0;
+    }
+
+    /* 记录 IDE 控制器索引 */
+    if (class_code == PCI_CLASS_MASS_STORAGE &&
+        subclass == PCI_SUBCLASS_IDE && ide_index < 0) {
+        ide_index = pci_device_count_val - 1;
+    }
+}
+
+/*
  * pci_scan_device — 扫描单个 PCI 设备
- * @bus: 总线号
+ * @bus:  总线号
  * @slot: 设备号
  *
- * 检查设备是否存在, 如果是 IDE 控制器则记录信息。
+ * 检查设备是否存在, 枚举所有功能。
  */
 static void pci_scan_device(uint8_t bus, uint8_t slot)
 {
     uint16_t vendor = pci_read_config_word(bus, slot, 0, PCI_VENDOR_ID);
-    uint32_t class_reg;
-    uint8_t class_code, subclass, prog_if;
 
     /* 0xFFFF 表示设备不存在 */
     if (vendor == 0xFFFF)
         return;
 
-    /* 读取类码 */
-    class_reg = pci_read_config_dword(bus, slot, 0, PCI_CLASS_CODE);
-    class_code = (uint8_t)((class_reg >> 24) & 0xFF);
-    subclass   = (uint8_t)((class_reg >> 16) & 0xFF);
-    prog_if    = (uint8_t)((class_reg >> 8) & 0xFF);
+    uint8_t header_type = pci_read_config_byte(bus, slot, 0, PCI_HEADER_TYPE);
+    uint8_t max_func = (header_type & 0x80) ? 8 : 1;
+    uint32_t class_reg;
 
-    /* 检查是否为 IDE 控制器 (类码 0x01, 子类 0x01) */
-    if (class_code == PCI_CLASS_MASS_STORAGE &&
-        subclass == PCI_SUBCLASS_IDE) {
-        ide_controller.bus       = bus;
-        ide_controller.slot      = slot;
-        ide_controller.func      = 0;
-        ide_controller.vendor_id = vendor;
-        ide_controller.device_id = pci_read_config_word(bus, slot, 0, 0x02);
-        ide_controller.class_code = class_code;
-        ide_controller.subclass  = subclass;
-        ide_controller.prog_if   = prog_if;
-        ide_controller.bar0      = pci_read_config_dword(bus, slot, 0, PCI_BAR0);
-        ide_controller.bar4      = pci_read_config_dword(bus, slot, 0, PCI_BAR4);
-        ide_controller.irq       = pci_read_config_byte(bus, slot, 0, PCI_INTERRUPT_LINE);
-        ide_found = true;
+    for (uint8_t func = 0; func < max_func; func++) {
+        if (func > 0) {
+            vendor = pci_read_config_word(bus, slot, func, PCI_VENDOR_ID);
+            if (vendor == 0xFFFF)
+                continue;
+        }
+
+        uint16_t device = pci_read_config_word(bus, slot, func, 0x02);
+        class_reg = pci_read_config_dword(bus, slot, func, PCI_CLASS_CODE);
+
+        uint8_t class_code = (uint8_t)((class_reg >> 24) & 0xFF);
+        uint8_t subclass   = (uint8_t)((class_reg >> 16) & 0xFF);
+        uint8_t prog_if    = (uint8_t)((class_reg >> 8) & 0xFF);
+
+        pci_add_device(bus, slot, func, vendor, device,
+                       class_code, subclass, prog_if);
     }
 }
 
 /*
  * pci_init — 初始化 PCI 子系统
  *
- * 扫描所有 PCI 总线和设备, 查找 IDE 控制器。
- * 找到后启用总线主控以支持 DMA。
+ * 扫描所有 PCI 总线和设备, 填充全局设备表。
+ * 找到 IDE 控制器后启用总线主控以支持 DMA。
  */
 void pci_init(void)
 {
-    uint16_t bus, slot;
+    pci_device_count_val = 0;
+    ide_index = -1;
 
     /* 扫描所有总线和设备 */
-    for (bus = 0; bus < 256; bus++) {
-        for (slot = 0; slot < 32; slot++) {
+    for (uint16_t bus = 0; bus < 256; bus++) {
+        for (uint16_t slot = 0; slot < 32; slot++) {
             pci_scan_device((uint8_t)bus, (uint8_t)slot);
         }
     }
 
-    if (ide_found) {
+    serial_puts("[pci] found devices: ");
+    serial_put_hex((uint32_t)pci_device_count_val);
+    serial_puts("h\n");
+
+    if (ide_index >= 0) {
         screen_puts("[pci] IDE controller found\n");
-
-        /* 启用总线主控 (DMA 需要) */
-        pci_enable_bus_master(&ide_controller);
-
+        pci_enable_bus_master(&pci_devices[ide_index]);
         screen_puts("[pci] Bus Master enabled\n");
     } else {
         screen_puts("[pci] No IDE controller found\n");
@@ -196,5 +243,26 @@ void pci_init(void)
  */
 struct pci_device *pci_get_ide_controller(void)
 {
-    return ide_found ? &ide_controller : NULL;
+    return (ide_index >= 0) ? &pci_devices[ide_index] : NULL;
+}
+
+/*
+ * pci_device_count — 获取已发现的 PCI 设备总数
+ * 返回: PCI 设备数量。
+ */
+int pci_device_count(void)
+{
+    return pci_device_count_val;
+}
+
+/*
+ * pci_get_device — 获取指定索引的 PCI 设备
+ * @index: 设备索引 (0 ~ count-1)
+ * 返回: PCI 设备结构指针, 无效索引返回 NULL。
+ */
+struct pci_device *pci_get_device(int index)
+{
+    if (index < 0 || index >= pci_device_count_val)
+        return NULL;
+    return &pci_devices[index];
 }

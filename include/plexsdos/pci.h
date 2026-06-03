@@ -2,6 +2,9 @@
  * Nexsteaduser — PlexsDOS
  * PCI 总线接口
  * 作者: Tinmc189623 | 团队: Nexlyh
+ *
+ * 扫描 PCI 总线, 枚举所有设备。
+ * 提供设备表和查询接口。
  */
 
 #ifndef _PLXSDOS_PCI_H
@@ -20,6 +23,14 @@ extern "C" {
 /* PCI 设备类码 */
 #define PCI_CLASS_MASS_STORAGE  0x01
 #define PCI_SUBCLASS_IDE        0x01
+#define PCI_SUBCLASS_SATA       0x06   /* 串行 ATA (AHCI) */
+#define PCI_SUBCLASS_NVME       0x08   /* NVM Express */
+
+#define PCI_CLASS_NETWORK       0x02
+#define PCI_CLASS_DISPLAY       0x03
+#define PCI_CLASS_MULTIMEDIA    0x04
+#define PCI_CLASS_BRIDGE        0x06
+#define PCI_SUBCLASS_PCI_BRIDGE 0x04
 
 /* PCI 配置寄存器偏移 */
 #define PCI_VENDOR_ID       0x00
@@ -37,6 +48,9 @@ extern "C" {
 #define PCI_CMD_MEM_ENABLE      (1 << 1)
 #define PCI_CMD_BUS_MASTER      (1 << 2)
 
+/* PCI 设备最大数量 */
+#define PCI_MAX_DEVICES     64
+
 /* PCI 设备结构 */
 struct pci_device {
     uint8_t  bus;
@@ -50,11 +64,11 @@ struct pci_device {
     uint32_t bar0;
     uint32_t bar4;
     uint8_t  irq;
-};
+} __attribute__((packed));
 
 /*
  * pci_init — 初始化 PCI 子系统
- * 扫描 PCI 总线, 查找 IDE 控制器。
+ * 扫描所有 PCI 总线, 枚举全部设备到设备表。
  */
 void pci_init(void);
 
@@ -93,6 +107,19 @@ void pci_enable_bus_master(struct pci_device *dev);
  * 返回: IDE 控制器 PCI 设备信息, 未找到返回 NULL。
  */
 struct pci_device *pci_get_ide_controller(void);
+
+/*
+ * pci_device_count — 获取已发现的 PCI 设备总数
+ * 返回: PCI 设备数量。
+ */
+int pci_device_count(void);
+
+/*
+ * pci_get_device — 获取指定索引的 PCI 设备
+ * @index: 设备索引 (0 ~ count-1)
+ * 返回: PCI 设备结构指针, 无效索引返回 NULL。
+ */
+struct pci_device *pci_get_device(int index);
 
 #ifdef __cplusplus
 }

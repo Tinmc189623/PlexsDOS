@@ -38,7 +38,7 @@ CXXFLAGS = -m32 -march=i686 \
            -Wall -Wextra -std=c++23 -Os -Iinclude
 
 ASFLAGS  = --32 -Iinclude
-LD_KERN  = -m i386pe -T linker.ld --image-base 0x0 -nostdlib -N
+LD_KERN  = -m i386pe -T linker.ld --image-base 0x0 -nostdlib -N --section-alignment 0x200
 
 export TEMP = C:\Users\Tindo\tmp
 export TMP  = C:\Users\Tindo\tmp
@@ -62,7 +62,9 @@ SRCS_C := $(wildcard kernel/*.c) \
           $(wildcard kernel/fs/*.c) \
           $(wildcard lib/*.c) \
           $(wildcard kernel/shim/*.c) \
-          $(wildcard kernel/dm/*.c)
+          $(wildcard kernel/dm/*.c) \
+          $(wildcard kernel/sched/*.c) \
+          $(wildcard kernel/security/*.c)
 
 SRCS_CXX := $(wildcard kernel/*.cpp) \
             $(wildcard kernel/arch/*.cpp) \
@@ -92,9 +94,17 @@ HD_VBR_BIN = $(BUILD_DIR)/hd_vbr.bin
 
 # 测试程序
 PROG_HELLO_SRC = programs/test_hello.S
-PROG_HELLO_ELF = $(BUILD_DIR)/programs/test_hello.elf
+PROG_HELLO_O   = $(BUILD_DIR)/programs/test_hello.o
+PROG_HELLO_EXE = $(BUILD_DIR)/programs/test_hello.exe
 PROG_HELLO_BIN = $(BUILD_DIR)/programs/HELLO.BIN
 PROG_HELLO_COMX = $(BUILD_DIR)/programs/HELLO.COMX
+
+# PnP 管理器
+PROG_PNP_SRC = programs/pnp.S
+PROG_PNP_O   = $(BUILD_DIR)/programs/pnp.o
+PROG_PNP_EXE = $(BUILD_DIR)/programs/pnp.exe
+PROG_PNP_BIN = $(BUILD_DIR)/programs/PNP.BIN
+PROG_PNP_COMX = $(BUILD_DIR)/programs/PNP.COMX
 
 # 安装软盘镜像
 INSTALL_BASE = plexsdos-x86_32-0.1-beta-install_disks
@@ -154,6 +164,7 @@ $(HD_VBR_BIN): boot/hd_vbr.S
 	$(AS) --32 $< -o $(BUILD_DIR)/hd_vbr.o
 	$(LD) -m i386pe -Ttext 0x7C00 --image-base 0x0 -nostdlib $(BUILD_DIR)/hd_vbr.o -o $(BUILD_DIR)/hd_vbr.elf
 	$(OBJCOPY) -O binary -j .text $(BUILD_DIR)/hd_vbr.elf $@
+	$(PYTHON) tools/fix_vbr.py $@
 
 # 内核链接 (MBR/VBR 通过 hd_boot.S 的 .incbin 嵌入)
 $(KERNEL_BIN): $(KERN_OBJS) $(HD_MBR_BIN) $(HD_VBR_BIN)
@@ -164,21 +175,39 @@ $(KERNEL_BIN): $(KERN_OBJS) $(HD_MBR_BIN) $(HD_VBR_BIN)
 $(FLOPPY_IMG): $(BOOT_BIN) $(KERNEL_BIN)
 	$(PYTHON) tools/mkfloppy.py $@ $(BOOT_BIN) $(KERNEL_BIN)
 
-# 编译测试程序 (flat binary)
-$(PROG_HELLO_ELF): $(PROG_HELLO_SRC)
+# 编译测试程序 (需链接以正确解析绝对地址)
+$(PROG_HELLO_O): $(PROG_HELLO_SRC)
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
-$(PROG_HELLO_BIN): $(PROG_HELLO_ELF)
-	$(OBJCOPY) -O binary -j .text -j .rodata $< $@
+$(PROG_HELLO_EXE): $(PROG_HELLO_O)
+	$(LD) -m i386pe -Ttext 0x50000 --image-base 0x0 -nostdlib --section-alignment 0x200 $< -o $@
+
+$(PROG_HELLO_BIN): $(PROG_HELLO_EXE)
+	$(OBJCOPY) -O binary -j .text $< $@
 
 # 打包为 .comx 格式
 $(PROG_HELLO_COMX): $(PROG_HELLO_BIN)
 	$(PYTHON) tools/mkcomx.py $< $@ --load-addr=0x50000
 
+# 编译 PnP 管理器 (需链接以正确解析 .bss/.rodata 绝对地址)
+$(PROG_PNP_O): $(PROG_PNP_SRC)
+	@mkdir -p $(dir $@)
+	$(AS) $(ASFLAGS) $< -o $@
+
+$(PROG_PNP_EXE): $(PROG_PNP_O)
+	$(LD) -m i386pe -Ttext 0x50000 --image-base 0x0 -nostdlib --section-alignment 0x200 $< -o $@
+
+$(PROG_PNP_BIN): $(PROG_PNP_EXE)
+	$(OBJCOPY) -O binary -j .text $< $@
+
+# 打包为 .comx 格式
+$(PROG_PNP_COMX): $(PROG_PNP_BIN)
+	$(PYTHON) tools/mkcomx.py $< $@ --load-addr=0x50000
+
 # 创建 FAT32 硬盘镜像 (64MB)
-$(DISK_IMG): $(PROG_HELLO_COMX) programs/README.TXT
-	$(PYTHON) tools/mkfat32.py $@ $(PROG_HELLO_COMX) programs/README.TXT
+$(DISK_IMG): $(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
+	$(PYTHON) tools/mkfat32.py $@ $(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
 
 # ===== 安装软盘构建 =====
 
@@ -191,8 +220,8 @@ $(DISK2_IMG): $(KERNEL_BIN)
 	$(PYTHON) tools/mkfat12.py $@ $(KERNEL_BIN)
 
 # 3 号盘: 程序文件
-$(DISK3_IMG): $(PROG_HELLO_COMX)
-	$(PYTHON) tools/mkfat12.py $@ $(PROG_HELLO_COMX)
+$(DISK3_IMG): $(PROG_HELLO_COMX) $(PROG_PNP_COMX)
+	$(PYTHON) tools/mkfat12.py $@ $(PROG_HELLO_COMX) $(PROG_PNP_COMX)
 
 # 4 号盘: 驱动/库 (预留, 创建空盘)
 $(DISK4_IMG):
@@ -212,18 +241,18 @@ install-disks: $(DISK1_IMG) $(DISK2_IMG) $(DISK3_IMG) $(DISK4_IMG) $(DISK5_IMG)
 # 替代 5 张安装软盘, 所有文件统一放在 ISO 中
 iso: $(ISO_IMG)
 
-$(ISO_IMG): $(DISK1_IMG) $(PROG_HELLO_COMX) programs/README.TXT
+$(ISO_IMG): $(DISK1_IMG) $(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
 	$(PYTHON) tools/mkiso.py $@ --boot-img $(DISK1_IMG) \
-		$(PROG_HELLO_COMX) programs/README.TXT
+		$(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
 
 # 40GB VMDK 虚拟硬盘镜像 (预装完整操作系统)
 vmdk: $(VMDK_IMG)
 
-$(VMDK_IMG): $(HD_MBR_BIN) $(HD_VBR_BIN) $(KERNEL_BIN) $(PROG_HELLO_COMX) programs/README.TXT
+$(VMDK_IMG): $(HD_MBR_BIN) $(HD_VBR_BIN) $(KERNEL_BIN) $(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
 	$(PYTHON) tools/mkvmdk.py $@ \
 		--mbr $(HD_MBR_BIN) --vbr $(HD_VBR_BIN) \
 		--kernel $(KERNEL_BIN) \
-		--file $(PROG_HELLO_COMX) --file programs/README.TXT \
+		--file $(PROG_HELLO_COMX) --file $(PROG_PNP_COMX) --file programs/README.TXT \
 		--size 40G
 
 # QEMU 测试 (软盘启动 + ATA 硬盘)

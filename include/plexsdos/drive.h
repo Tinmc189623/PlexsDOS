@@ -16,14 +16,36 @@
 extern "C" {
 #endif
 
-/* 最大驱动器数量 */
-#define DRIVE_MAX        4
+/* 最大驱动器数量 (A:-Z:) */
+#define DRIVE_MAX          26
 
 /* 驱动器字母索引 */
 #define DRIVE_LETTER_A   0
 #define DRIVE_LETTER_B   1
 #define DRIVE_LETTER_C   2
 #define DRIVE_LETTER_D   3
+#define DRIVE_LETTER_E   4
+#define DRIVE_LETTER_F   5
+#define DRIVE_LETTER_G   6
+#define DRIVE_LETTER_H   7
+#define DRIVE_LETTER_I   8
+#define DRIVE_LETTER_J   9
+#define DRIVE_LETTER_K   10
+#define DRIVE_LETTER_L   11
+#define DRIVE_LETTER_M   12
+#define DRIVE_LETTER_N   13
+#define DRIVE_LETTER_O   14
+#define DRIVE_LETTER_P   15
+#define DRIVE_LETTER_Q   16
+#define DRIVE_LETTER_R   17
+#define DRIVE_LETTER_S   18
+#define DRIVE_LETTER_T   19
+#define DRIVE_LETTER_U   20
+#define DRIVE_LETTER_V   21
+#define DRIVE_LETTER_W   22
+#define DRIVE_LETTER_X   23
+#define DRIVE_LETTER_Y   24
+#define DRIVE_LETTER_Z   25
 
 /* 驱动器类型 */
 #define DRIVE_TYPE_NONE    0

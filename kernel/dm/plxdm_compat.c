@@ -13,10 +13,7 @@
 
 /* ==================== 内存池 ==================== */
 
-/* 通用字符串分配 (bump arena) */
-#define STRING_ARENA_SIZE 32768
-static char string_arena[STRING_ARENA_SIZE];
-static unsigned int string_arena_used = 0;
+/* 字符串分配现在直接使用堆 (malloc/free) */
 
 /* GList/GSList 节点池 */
 #define NODE_POOL_SIZE 256
@@ -112,23 +109,7 @@ static guint64 get_ticks(void)
     return system_ticks;
 }
 
-static void *arena_alloc(unsigned int size)
-{
-    /* 对齐到 4 字节 */
-    unsigned int align = (4 - (string_arena_used & 3)) & 3;
-    unsigned int need = string_arena_used + align + size;
-    if (need > STRING_ARENA_SIZE)
-        return NULL;
-    string_arena_used += align;
-    void *ptr = &string_arena[string_arena_used];
-    string_arena_used += size;
-    return ptr;
-}
-
-static void arena_reset(void)
-{
-    string_arena_used = 0;
-}
+/* arena_alloc 已弃用 — 改用 malloc */
 
 /* ==================== 字符串工具 ==================== */
 
@@ -141,7 +122,7 @@ gchar *g_strdup(const gchar *str)
     while (str[len])
         len++;
 
-    gchar *copy = (gchar *)arena_alloc(len + 1);
+    gchar *copy = (gchar *)malloc(len + 1);
     if (!copy)
         return NULL;
 
@@ -273,7 +254,7 @@ gchar *g_strdup_vprintf(const gchar *format, va_list args)
     char stack_buf[256];
     int len = vsnprintf_impl(stack_buf, 256, format, args);
 
-    gchar *result = (gchar *)arena_alloc(len + 1);
+    gchar *result = (gchar *)malloc(len + 1);
     if (!result)
         return NULL;
 
@@ -311,7 +292,7 @@ gchar **g_strsplit(const gchar *str, const gchar *delimiter, gint max_tokens)
         tokens = max_tokens;
 
     /* 分配数组 (tokens + 1 以 NULL 结尾) */
-    gchar **result = (gchar **)arena_alloc(sizeof(gchar *) * (tokens + 1));
+    gchar **result = (gchar **)malloc(sizeof(gchar *) * (tokens + 1));
     if (!result) return NULL;
 
     int ti = 0;
@@ -328,7 +309,7 @@ gchar **g_strsplit(const gchar *str, const gchar *delimiter, gint max_tokens)
         }
 
         int seg_len = (int)(end - p);
-        result[ti] = (gchar *)arena_alloc(seg_len + 1);
+        result[ti] = (gchar *)malloc(seg_len + 1);
         if (result[ti]) {
             for (int i = 0; i < seg_len; i++)
                 result[ti][i] = p[i];
@@ -341,7 +322,7 @@ gchar **g_strsplit(const gchar *str, const gchar *delimiter, gint max_tokens)
     /* 最后一段 */
     int last_len = 0;
     while (p[last_len]) last_len++;
-    result[ti] = (gchar *)arena_alloc(last_len + 1);
+    result[ti] = (gchar *)malloc(last_len + 1);
     if (result[ti]) {
         for (int i = 0; i < last_len; i++)
             result[ti][i] = p[i];
@@ -371,7 +352,7 @@ gchar *g_strjoinv(const gchar *separator, gchar **str_array)
     if (total > 0) total -= sep_len; /* 去掉最后的分隔符 */
     if (total < 0) total = 0;
 
-    gchar *result = (gchar *)arena_alloc(total + 1);
+    gchar *result = (gchar *)malloc(total + 1);
     if (!result) return NULL;
 
     int pos = 0;
@@ -408,7 +389,7 @@ gchar *g_strconcat(const gchar *string1, ...)
     }
     va_end(ap);
 
-    gchar *result = (gchar *)arena_alloc(total + 1);
+    gchar *result = (gchar *)malloc(total + 1);
     if (!result) return NULL;
 
     int pos = 0;
@@ -427,8 +408,10 @@ gchar *g_strconcat(const gchar *string1, ...)
 
 void g_strfreev(gchar **str_array)
 {
-    /* Arena 分配, 无需释放 */
-    (void)str_array;
+    if (!str_array) return;
+    for (int i = 0; str_array[i]; i++)
+        free(str_array[i]);
+    free(str_array);
 }
 
 gboolean g_str_has_prefix(const gchar *str, const gchar *prefix)
@@ -1842,6 +1825,7 @@ gint g_key_file_get_integer(GKeyFile *key_file, const gchar *group_name,
         result = result * 10 + (*p - '0');
         p++;
     }
+    g_free(val);
     return result * sign;
 }
 
@@ -1851,11 +1835,13 @@ gboolean g_key_file_get_boolean(GKeyFile *key_file, const gchar *group_name,
     gchar *val = g_key_file_get_string(key_file, group_name, key, error);
     if (!val) return FALSE;
 
+    gboolean ret = FALSE;
     if (g_ascii_strcasecmp(val, "true") == 0 ||
         g_ascii_strcasecmp(val, "1") == 0 ||
         g_ascii_strcasecmp(val, "yes") == 0)
-        return TRUE;
-    return FALSE;
+        ret = TRUE;
+    g_free(val);
+    return ret;
 }
 
 gchar **g_key_file_get_string_list(GKeyFile *key_file, const gchar *group_name,
@@ -1870,6 +1856,7 @@ gchar **g_key_file_get_string_list(GKeyFile *key_file, const gchar *group_name,
 
     /* 以分号分隔 */
     gchar **result = g_strsplit(val, ";", 0);
+    g_free(val);
     if (length) {
         *length = 0;
         if (result) {
@@ -1896,7 +1883,7 @@ gchar **g_key_file_get_keys(GKeyFile *key_file, const gchar *group_name,
     }
 
     int count = key_file->groups[g].entry_count;
-    gchar **result = (gchar **)arena_alloc(sizeof(gchar *) * (count + 1));
+    gchar **result = (gchar **)malloc(sizeof(gchar *) * (count + 1));
     if (!result) {
         if (length) *length = 0;
         return NULL;
@@ -1918,7 +1905,7 @@ gchar **g_key_file_get_groups(GKeyFile *key_file, gsize *length)
         return NULL;
     }
 
-    gchar **result = (gchar **)arena_alloc(sizeof(gchar *) * (key_file->group_count + 1));
+    gchar **result = (gchar **)malloc(sizeof(gchar *) * (key_file->group_count + 1));
     if (!result) {
         if (length) *length = 0;
         return NULL;
@@ -2176,7 +2163,7 @@ gchar *plxdm_build_filename(const gchar *first, ...)
     }
     va_end(ap);
 
-    gchar *result = (gchar *)arena_alloc(total + 1);
+    gchar *result = (gchar *)malloc(total + 1);
     if (!result) return NULL;
 
     int pos = 0;
@@ -3277,22 +3264,133 @@ gchar **g_variant_dup_strv(GVariant *value, gsize *length)
     return NULL;
 }
 
-/* ==================== 堆分配器 (bump arena) ==================== */
-/* PlexsDOS 无动态内存, 使用静态池 + bump 分配。free 为空操作。 */
-#define HEAP_POOL_SIZE (512 * 1024)  /* 512KB 堆 */
+/* ==================== 堆分配器 (边界标签 free-list) ==================== */
+/* PlexsDOS 使用 512KB 静态池 + 边界标签 (boundary-tag) 算法。
+ * free() 实际回收内存: 相邻空闲块合并, 插入空闲链表供后续 malloc 复用。
+ *
+ * 块布局:
+ *   已分配块: [4字节 头部: 总大小|IN_USE] [...数据...]
+ *   空闲块:   [4字节 头部: 总大小|0] [4字节 next] [4字节 prev] [...数据...] [4字节 尾部: 总大小|0]
+ *
+ * 头部 bit31 = IN_USE 标志, bits30-0 = 块总大小 (含头部/尾部/指针)。
+ * 最小分配: 8 字节 (4 头部 + 4 数据)。最小空闲块: 16 字节。 */
+#define HEAP_POOL_SIZE (512 * 1024)
+#define BLK_IN_USE    0x80000000u
+#define BLK_SIZE_MASK 0x7FFFFFFFu
+#define MIN_ALLOC     8u
+#define MIN_FREE      16u
+
 static char heap_pool[HEAP_POOL_SIZE];
-static unsigned int heap_used = 0;
+static void *heap_free_list = NULL;
+static int heap_initialized = 0;
+
+/* 读取/写入块头部 */
+static inline uint32_t blk_get_hdr(void *blk)
+    { return *(uint32_t *)blk; }
+static inline void blk_set_hdr(void *blk, uint32_t v)
+    { *(uint32_t *)blk = v; }
+/* 块总大小 (含头部) */
+static inline uint32_t blk_size(uint32_t hdr)
+    { return hdr & BLK_SIZE_MASK; }
+/* 是否已分配 */
+static inline int blk_in_use(uint32_t hdr)
+    { return (hdr & BLK_IN_USE) != 0; }
+
+/* 空闲链表指针 (块内偏移 4 和 8) */
+static inline void blk_set_next(void *blk, void *n)
+    { *(void **)((char *)blk + 4) = n; }
+static inline void *blk_get_next(void *blk)
+    { return *(void **)((char *)blk + 4); }
+static inline void blk_set_prev(void *blk, void *p)
+    { *(void **)((char *)blk + 8) = p; }
+static inline void *blk_get_prev(void *blk)
+    { return *(void **)((char *)blk + 8); }
+
+/* 从空闲链表中移除一个块 */
+static void blk_remove_free(void *blk)
+{
+    void *n = blk_get_next(blk);
+    void *p = blk_get_prev(blk);
+    if (p)
+        blk_set_next(p, n);
+    else
+        heap_free_list = n;
+    if (n)
+        blk_set_prev(n, p);
+}
+
+/* 向空闲链表头部插入一个块 */
+static void blk_insert_free(void *blk)
+{
+    blk_set_next(blk, heap_free_list);
+    blk_set_prev(blk, NULL);
+    if (heap_free_list)
+        blk_set_prev(heap_free_list, blk);
+    heap_free_list = blk;
+}
+
+/* 写入尾部标签 (位于 blk + size - 4) */
+static inline void blk_set_footer(void *blk, uint32_t v)
+    { *(uint32_t *)((char *)blk + blk_size(v) - 4) = v; }
+
+/* 初始化堆: 整个池子作为一个大空闲块 */
+static void heap_init(void)
+{
+    if (heap_initialized) return;
+    blk_set_hdr(heap_pool, HEAP_POOL_SIZE);      /* free, size=512KB */
+    blk_set_next(heap_pool, NULL);
+    blk_set_prev(heap_pool, NULL);
+    blk_set_footer(heap_pool, HEAP_POOL_SIZE);
+    heap_free_list = heap_pool;
+    heap_initialized = 1;
+}
 
 void *malloc(size_t size)
 {
     if (size == 0) return NULL;
-    unsigned int align = (4 - (heap_used & 3)) & 3;
-    unsigned int total = heap_used + align + (unsigned int)size;
-    if (total > HEAP_POOL_SIZE) return NULL;
-    heap_used += align;
-    void *ptr = &heap_pool[heap_used];
-    heap_used += (unsigned int)size;
-    return ptr;
+    heap_init();
+
+    uint32_t need = (uint32_t)size + 4;           /* 头部 + 数据 */
+    if (need < MIN_ALLOC) need = MIN_ALLOC;
+    need = (need + 3) & ~3u;                      /* 4 字节对齐 */
+
+    /* first-fit 扫描空闲链表 */
+    void *blk = heap_free_list;
+    while (blk) {
+        uint32_t hdr = blk_get_hdr(blk);
+        uint32_t bsz = blk_size(hdr);
+        if (bsz >= need) {
+            uint32_t remain = bsz - need;
+            if (remain >= MIN_FREE) {
+                /* 分裂: 前部 [need] 字节用作已分配, 后部 [remain] 空闲 */
+                blk_set_hdr(blk, need | BLK_IN_USE);
+                blk_set_footer(blk, need | BLK_IN_USE);
+
+                void *nxt = (char *)blk + need;
+                blk_set_hdr(nxt, remain);
+                blk_set_next(nxt, blk_get_next(blk));
+                blk_set_prev(nxt, blk_get_prev(blk));
+                blk_set_footer(nxt, remain);
+
+                /* 更新 nxt 相邻块的 prev/next */
+                if (blk_get_next(nxt))
+                    blk_set_prev(blk_get_next(nxt), nxt);
+                /* 替换空闲链表中的当前块为 nxt */
+                if (blk_get_prev(blk))
+                    blk_set_next(blk_get_prev(blk), nxt);
+                else
+                    heap_free_list = nxt;
+            } else {
+                /* 不分裂, 整个块分配出去 */
+                blk_set_hdr(blk, bsz | BLK_IN_USE);
+                blk_set_footer(blk, bsz | BLK_IN_USE);
+                blk_remove_free(blk);
+            }
+            return (char *)blk + 4;               /* 返回数据区起始 */
+        }
+        blk = blk_get_next(blk);
+    }
+    return NULL;  /* 内存不足 */
 }
 
 void *calloc(size_t nmemb, size_t size)
@@ -3305,15 +3403,66 @@ void *calloc(size_t nmemb, size_t size)
 
 void *realloc(void *ptr, size_t size)
 {
-    /* bump 分配器不支持原地扩容; 直接分配新块 */
+    if (!ptr) return malloc(size);
+    if (size == 0) { free(ptr); return NULL; }
+
+    uint32_t *hdr = (uint32_t *)((char *)ptr - 4);
+    uint32_t old_hdr = *hdr;
+    uint32_t old_size = blk_size(old_hdr) - 4;    /* 可用数据大小 */
+
+    if ((uint32_t)size <= old_size)
+        return ptr;                                /* 缩小, 直接返回 */
+
     void *newptr = malloc(size);
+    if (newptr) {
+        __builtin_memcpy(newptr, ptr,
+                         old_size < (uint32_t)size ? old_size : (uint32_t)size);
+        free(ptr);
+    }
     return newptr;
 }
 
 void free(void *ptr)
 {
-    (void)ptr;
-    /* bump 分配器: 空操作 */
+    if (!ptr || !heap_initialized) return;
+
+    void *blk = (char *)ptr - 4;                  /* 定位到头部 */
+    uint32_t hdr = blk_get_hdr(blk);
+    uint32_t bsz = blk_size(hdr);
+
+    /* 标记为空闲 (清除 IN_USE) */
+    blk_set_hdr(blk, bsz);
+    blk_set_footer(blk, bsz);
+
+    /* 向前合并: 检查后方 (地址更高) 的相邻块是否空闲 */
+    void *nxt = (char *)blk + bsz;
+    if ((char *)nxt < heap_pool + HEAP_POOL_SIZE) {
+        uint32_t nxt_hdr = blk_get_hdr(nxt);
+        if (!blk_in_use(nxt_hdr)) {
+            uint32_t nxt_sz = blk_size(nxt_hdr);
+            blk_remove_free(nxt);
+            bsz += nxt_sz;
+            blk_set_hdr(blk, bsz);
+        }
+    }
+
+    /* 向后合并: 检查前方 (地址更低) 的相邻块是否空闲
+     * 通过读取 blk 前 4 字节 (上一块的尾部标签) 判断 */
+    if ((char *)blk > heap_pool) {
+        uint32_t prev_footer = *(uint32_t *)((char *)blk - 4);
+        if (!blk_in_use(prev_footer)) {
+            uint32_t prev_sz = blk_size(prev_footer);
+            void *prev = (char *)blk - prev_sz;
+            blk_remove_free(prev);
+            bsz += prev_sz;
+            blk = prev;
+            blk_set_hdr(blk, bsz);
+        }
+    }
+
+    /* 更新尾部标签并插入空闲链表头部 */
+    blk_set_footer(blk, bsz);
+    blk_insert_free(blk);
 }
 
 /* errno */

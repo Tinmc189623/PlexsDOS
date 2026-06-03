@@ -97,6 +97,24 @@ bool disk_read_sectors(uint32_t lba, uint8_t count, void *buf);
 bool disk_write_sectors(uint32_t lba, uint8_t count, const void *buf);
 
 /*
+ * disk_set_override — 设置磁盘读写函数覆盖
+ * @read_fn:  扇区读取函数 (NULL = 使用默认 ATA)
+ * @write_fn: 扇区写入函数 (NULL = 使用默认 ATA)
+ *
+ * 用于 AHCI 等替代存储驱动接管磁盘 I/O。
+ */
+void disk_set_override(
+    bool (*read_fn)(uint32_t lba, uint8_t count, void *buf),
+    bool (*write_fn)(uint32_t lba, uint8_t count, const void *buf)
+);
+
+/*
+ * disk_read_override_active — 检查磁盘读写是否已被覆盖
+ * 返回: true = 已覆盖 (AHCI 或其他驱动已接管)。
+ */
+int disk_read_override_active(void);
+
+/*
  * disk_set_dma_mode — 设置 DMA 传输模式
  * @mode: DMA_MODE_PIO 或 DMA_MODE_DMA
  */

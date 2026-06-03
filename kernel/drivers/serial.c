@@ -115,3 +115,42 @@ void serial_put_hex(uint32_t val)
     for (i = 28; i >= 0; i -= 4)
         serial_putchar(hex[(val >> i) & 0xF]);
 }
+
+/*
+ * serial_available — 检查串口是否有数据可读
+ * 返回: 1 = 有数据, 0 = 无数据
+ */
+int serial_available(void)
+{
+    uint8_t lsr;
+    __asm__ __volatile__(
+        "inb %%dx, %%al"
+        : "=a"(lsr)
+        : "d"((uint16_t)(COM1 + 5))
+    );
+    return (lsr & 0x01) ? 1 : 0;
+}
+
+/*
+ * serial_getchar — 从串口读取一个字符 (非阻塞)
+ * 返回: 读取的字符, 无数据时返回 -1
+ */
+int serial_getchar(void)
+{
+    uint8_t lsr;
+    __asm__ __volatile__(
+        "inb %%dx, %%al"
+        : "=a"(lsr)
+        : "d"((uint16_t)(COM1 + 5))
+    );
+    if (!(lsr & 0x01))
+        return -1;
+
+    uint8_t ch;
+    __asm__ __volatile__(
+        "inb %%dx, %%al"
+        : "=a"(ch)
+        : "d"((uint16_t)COM1)
+    );
+    return (int)ch;
+}

@@ -23,15 +23,160 @@
 extern "C" {
 #endif
 
+/* ===== 常量 ===== */
+
+/* 块设备类型 */
+#define HAL_BLKDEV_NONE     0
+#define HAL_BLKDEV_FLOPPY   1
+#define HAL_BLKDEV_ATA      2
+#define HAL_BLKDEV_ATAPI    3
+
+#define HAL_MAX_BLKDEV      8       /* 最大注册块设备数 */
+#define HAL_MAX_PARTITIONS  16      /* 最大分区数 */
+
+/* 分区类型 (MBR) */
+#define PART_TYPE_EMPTY     0x00
+#define PART_TYPE_FAT12     0x01
+#define PART_TYPE_FAT16     0x06
+#define PART_TYPE_FAT32     0x0B
+#define PART_TYPE_FAT32_LBA 0x0C
+#define PART_TYPE_EXTENDED  0x05    /* CHS 扩展分区 */
+#define PART_TYPE_EXTENDED_LBA 0x0F /* LBA 扩展分区 */
+
 /* ===== 初始化 ===== */
 
 /*
  * hal_init — 初始化硬件抽象层
  *
- * 检测 CPU 特性、PIC 状态, 打印 HAL 信息。
+ * 初始化 HAL 子系统、检测 CPU 特性、PIC 状态。
  * 由 kernel_main() 在各子系统初始化前调用。
  */
 void hal_init(void);
+
+/* ===== 块设备抽象层 ===== */
+
+/* 块设备操作函数表 */
+struct hal_blkdev_ops {
+    /*
+     * read — 从块设备读取扇区
+     * @lba:   起始 LBA
+     * @count: 扇区数
+     * @buf:   目标缓冲区
+     * 返回: true = 成功。
+     */
+    bool (*read)(uint32_t lba, uint8_t count, void *buf);
+
+    /*
+     * write — 向块设备写入扇区
+     * @lba:   起始 LBA
+     * @count: 扇区数
+     * @buf:   源数据缓冲区
+     * 返回: true = 成功。
+     */
+    bool (*write)(uint32_t lba, uint8_t count, const void *buf);
+};
+
+/* 块设备实例 */
+struct hal_blkdev {
+    uint8_t  type;                /* HAL_BLKDEV_* */
+    uint8_t  driver_id;           /* 驱动实例号 */
+    struct hal_blkdev_ops *ops;   /* I/O 操作 */
+};
+
+/*
+ * hal_blkdev_register — 注册块设备
+ * @type:      HAL_BLKDEV_FLOPPY / ATA / ATAPI
+ * @driver_id: 驱动实例号 (FDC drive 0/1, ATA master=0)
+ * @ops:       操作函数表
+ * 返回: 设备 ID (>=0), 失败返回 -1。
+ */
+int hal_blkdev_register(uint8_t type, uint8_t driver_id,
+                        struct hal_blkdev_ops *ops);
+
+/*
+ * hal_blkdev_count — 获取注册的块设备数量
+ * 返回: 设备数量。
+ */
+int hal_blkdev_count(void);
+
+/*
+ * hal_blkdev_get — 获取块设备信息
+ * @dev_id: 设备 ID
+ * 返回: 设备指针, 无效返回 NULL。
+ */
+struct hal_blkdev *hal_blkdev_get(int dev_id);
+
+/*
+ * hal_blk_read — 从块设备读取扇区
+ * @dev_id: 设备 ID
+ * @lba:    起始 LBA
+ * @count:  扇区数
+ * @buf:    目标缓冲区
+ * 返回: true = 成功。
+ */
+bool hal_blk_read(int dev_id, uint32_t lba, uint8_t count, void *buf);
+
+/*
+ * hal_blk_write — 向块设备写入扇区
+ * @dev_id: 设备 ID
+ * @lba:    起始 LBA
+ * @count:  扇区数
+ * @buf:    源数据缓冲区
+ * 返回: true = 成功。
+ */
+bool hal_blk_write(int dev_id, uint32_t lba, uint8_t count, const void *buf);
+
+/* ===== 分区扫描 ===== */
+
+/* MBR 分区条目 */
+struct hal_part_entry {
+    uint8_t  status;         /* 0x80 = 活动 (可引导) */
+    uint8_t  type;           /* 分区类型 */
+    uint32_t lba_start;      /* 起始 LBA (绝对) */
+    uint32_t sector_count;   /* 扇区数 */
+};
+
+/*
+ * hal_mbr_scan — 扫描 MBR 主分区
+ * @dev_id:   块设备 ID
+ * @parts:    [输出] 分区数组
+ * @max_parts: 数组大小
+ * 返回: 找到的主分区数。
+ *
+ * 读取设备的 LBA 0 (MBR), 解析 4 个主分区条目。
+ * 扩展分区本身不计入, 但其内的逻辑分区通过 hal_extended_scan 获取。
+ */
+int hal_mbr_scan(int dev_id, struct hal_part_entry *parts, int max_parts);
+
+/*
+ * hal_extended_scan — 递归扫描扩展分区 (EBR 链)
+ * @dev_id:   块设备 ID
+ * @ebr_lba:  EBR 起始 LBA (来自主扩展分区的 lba_start)
+ * @parts:    [输出] 逻辑分区数组
+ * @max_parts: 数组大小
+ * @offset:   写入 parts 的起始索引
+ * 返回: 找到的逻辑分区数。
+ *
+ * 遍历 EBR 链:
+ *   每个 EBR 中:
+ *     条目 1 → 逻辑分区数据区
+ *     条目 2 → 下一个 EBR 的 LBA (链指针, 0=结束)
+ */
+int hal_extended_scan(int dev_id, uint32_t ebr_lba,
+                      struct hal_part_entry *parts,
+                      int max_parts, int offset);
+
+/*
+ * hal_partition_scan_all — 扫描设备上的全部分区 (主+扩展)
+ * @dev_id:   块设备 ID
+ * @parts:    [输出] 分区数组
+ * @max_parts: 数组大小
+ * 返回: 找到的全部分区数。
+ *
+ * 先扫描 MBR 主分区, 如果找到扩展分区则递归扫描其 EBR 链。
+ */
+int hal_partition_scan_all(int dev_id, struct hal_part_entry *parts,
+                           int max_parts);
 
 /* ===== 端口 I/O ===== */
 

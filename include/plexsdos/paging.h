@@ -96,8 +96,18 @@ int page_map(uint32_t vaddr, uint32_t paddr, uint32_t flags);
  * @vaddr: 虚拟地址 (4KB 对齐)
  *
  * 清除页表条目并刷新 TLB。
+ * 不释放物理页帧 (调用者需自行管理)。
  */
 void page_unmap(uint32_t vaddr);
+
+/*
+ * page_unmap_and_free — 取消虚拟地址的映射并释放物理页帧
+ * @vaddr: 虚拟地址 (4KB 对齐)
+ *
+ * 清除页表条目, 刷新 TLB, 并将对应的物理页帧归还给页帧分配器。
+ * 仅用于动态映射的页面, 不可用于 identity-map 的内核页面。
+ */
+void page_unmap_and_free(uint32_t vaddr);
 
 /*
  * page_get_mapping — 获取虚拟地址对应的物理地址

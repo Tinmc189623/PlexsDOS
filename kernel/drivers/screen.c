@@ -11,6 +11,7 @@
 #include <plexsdos/types.h>
 #include <plexsdos/config.h>
 #include <plexsdos/screen.h>
+#include <plexsdos/serial.h>
 
 /* VGA 文本模式显存基址 */
 static volatile uint16_t *vga = (volatile uint16_t *)VGA_TEXT_BUFFER;
@@ -70,6 +71,14 @@ static void screen_scroll(void)
  */
 void screen_putchar(char c)
 {
+    /* 串口镜像: 所有 VGA 输出同时发送到 COM1 (串口调试用) */
+    if (c == '\n') {
+        serial_putchar('\r');
+        serial_putchar('\n');
+    } else if (c >= 32) {
+        serial_putchar(c);
+    }
+
     if (c == '\n') {
         /* 换行: 移到下一行行首 */
         cursor_pos = (cursor_pos / SCREEN_COLS + 1) * SCREEN_COLS;

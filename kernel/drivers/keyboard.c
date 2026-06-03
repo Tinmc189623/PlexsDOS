@@ -13,6 +13,7 @@
 #include <plexsdos/keyboard.h>
 #include <plexsdos/screen.h>
 #include <plexsdos/interrupt.h>
+#include <plexsdos/serial.h>
 
 /* 键盘缓冲区 (环形队列) */
 static char kbd_buffer[KBD_BUFFER_SIZE];
@@ -20,14 +21,14 @@ static int  kbd_head = 0;   /* 读指针 */
 static int  kbd_tail = 0;   /* 写指针 */
 static int  kbd_count = 0;  /* 缓冲区中的字符数 */
 
-/* 修饰键状态 */
-static int shift_pressed = 0;
-static int caps_lock = 0;
-static int ctrl_pressed = 0;
-static int alt_pressed = 0;
+/* 修饰键状态 (volatile: 在中断处理器中跨调用修改) */
+static volatile int shift_pressed = 0;
+static volatile int caps_lock = 0;
+static volatile int ctrl_pressed = 0;
+static volatile int alt_pressed = 0;
 
 /* E0 扩展扫描码前缀标志 */
-static int e0_prefix = 0;
+static volatile int e0_prefix = 0;
 
 /*
  * 方向键转义序列 (VT100 兼容)
@@ -204,9 +205,9 @@ static const char scancode_table[128] = {
    '\'', '`',  0, '\\', 'z', 'x', 'c', 'v',  /* 0x28-0x2F: ', `, LShift, \, z-v */
    'b', 'n', 'm', ',', '.', '/',  0,  '*',  /* 0x30-0x37: b-m, ,, ., /, RShift, * (KP) */
     0,  ' ',  0,   0,   0,   0,   0,   0,   /* 0x38-0x3F: LAlt, Space, CapsLock, F1-F5 */
-    0,   0,   0,   0,   0,   0,   0,   0,   /* 0x40-0x47: F6-F10, NumLock, ScrollLock, KP 7-8 */
-    0,   0,  '-',  0,   0,   0,  '+',  0,   /* 0x48-0x4F: KP 9, KP -, KP 4, KP 5, KP 6, KP +, KP 1 */
-    0,   0,   0,   0,   0,   0,   0,   0,   /* 0x50-0x57: KP 2, KP 3, KP 0, KP ., F11, F12 */
+    0,   0,   0,   0,   0,   0,   0,  '7', /* 0x40-0x47: F6-F10, NumLock, ScrollLock, KP 7 */
+    '8', '9', '-', '4', '5', '6', '+', '1', /* 0x48-0x4F: KP 8, KP 9, KP -, KP 4-6, KP +, KP 1 */
+    '2', '3', '0', '.',  0,   0,   0,   0,   /* 0x50-0x57: KP 2, KP 3, KP 0, KP ., F11, F12 */
     0,   0,   0,   0,   0,   0,   0,   0,   /* 0x58-0x5F */
     0,   0,   0,   0,   0,   0,   0,   0,   /* 0x60-0x67 */
     0,   0,   0,   0,   0,   0,   0,   0,   /* 0x68-0x6F */
@@ -226,9 +227,9 @@ static const char scancode_shift_table[128] = {
    '"', '~',  0,  '|', 'Z', 'X', 'C', 'V',  /* 0x28-0x2F */
    'B', 'N', 'M', '<', '>', '?',  0,  '*',  /* 0x30-0x37 */
     0,  ' ',  0,   0,   0,   0,   0,   0,   /* 0x38-0x3F */
-    0,   0,   0,   0,   0,   0,   0,   0,   /* 0x40-0x47 */
-    0,   0,  '-',  0,   0,   0,  '+',  0,   /* 0x48-0x4F */
-    0,   0,   0,   0,   0,   0,   0,   0,   /* 0x50-0x57 */
+    0,   0,   0,   0,   0,   0,   0,  '7', /* 0x40-0x47: F6-F10, NumLock, ScrollLock, KP 7 */
+    '8', '9', '-', '4', '5', '6', '+', '1', /* 0x48-0x4F: KP 8, KP 9, KP -, KP 4-6, KP +, KP 1 */
+    '2', '3', '0', '.',  0,   0,   0,   0,   /* 0x50-0x57: KP 2, KP 3, KP 0, KP ., F11, F12 */
     0,   0,   0,   0,   0,   0,   0,   0,   /* 0x58-0x5F */
     0,   0,   0,   0,   0,   0,   0,   0,   /* 0x60-0x67 */
     0,   0,   0,   0,   0,   0,   0,   0,   /* 0x68-0x6F */
@@ -326,7 +327,7 @@ void kbd_interrupt_handler(void)
         case 0x4D: /* 右 */
             kbd_put_arrow(KBD_ESC_RIGHT);
             return;
-        case 0x52: /* Insert */
+        case 0x52: /* Insert (静默) */
             return;
         case 0x53: /* Delete (E0) */
             kbd_buffer_put(0x7F);
@@ -341,10 +342,14 @@ void kbd_interrupt_handler(void)
             kbd_buffer_put('[');
             kbd_buffer_put('F');
             return;
-        case 0x49: /* Page Up */
+        case 0x49: /* Page Up (静默) */
             return;
-        case 0x51: /* Page Down */
+        case 0x51: /* Page Down (静默) */
             return;
+        case 0x5B: /* Left Windows */
+        case 0x5C: /* Right Windows */
+        case 0x5D: /* Menu/App */
+            return; /* 静默吸收 */
         default:
             return; /* 其他 E0 键忽略 */
         }
@@ -385,16 +390,21 @@ void kbd_interrupt_handler(void)
     case 0x3A: /* Caps Lock */
         caps_lock = !caps_lock;
         return;
-    case 0x3B: case 0x3C: case 0x3D: case 0x3E: /* F1-F4 */
-    case 0x3F: case 0x40: case 0x41: case 0x42: /* F5-F8 */
-    case 0x43: case 0x44: /* F9-F10 */
-    case 0x57: case 0x58: /* F11-F12 */
+    case 0x3B: /* F1 (静默) */
+    case 0x3C: /* F2 (静默) */
+    case 0x3D: /* F3 (静默) */
+    case 0x3E: /* F4 (静默) */
+    case 0x3F: /* F5 (静默) */
+    case 0x40: /* F6 (静默) */
+    case 0x41: /* F7 (静默) */
+    case 0x42: /* F8 (静默) */
+    case 0x43: /* F9 (静默) */
+    case 0x44: /* F10 (静默) */
+    case 0x57: /* F11 (静默) */
+    case 0x58: /* F12 (静默) */
         return;
     case 0x01: /* ESC */
         kbd_buffer_put(0x1B);
-        return;
-    case 0x53: /* Delete (非 E0) */
-        kbd_buffer_put(0x7F);
         return;
     default:
         break;
@@ -515,13 +525,18 @@ void keyboard_init(void)
 
 /*
  * keyboard_getchar — 阻塞读取一个字符
- * 忙等待键盘缓冲区有数据, 然后返回字符。
+ * 从键盘缓冲区读取字符。当缓冲区为空时,
+ * 轮询串口输入, 使得通过 QEMU 终端 (-serial stdio) 输入的字符也能被接收。
  */
 char keyboard_getchar(void)
 {
     int c;
     while ((c = kbd_buffer_get()) == -1) {
-        /* 忙等待, 可插入 hlt 指令降低功耗 */
+        /* 轮询串口输入: 终端输入优先走此路径 */
+        c = serial_getchar();
+        if (c >= 0)
+            return (char)c;
+        /* 节能等待 */
         __asm__ __volatile__("hlt");
     }
     return (char)c;

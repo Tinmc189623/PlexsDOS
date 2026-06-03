@@ -173,7 +173,13 @@ load_loop:
     movzbl bpb_sec_per_clust, %eax
     shl  $9, %eax                 /* * 512 */
     add  %eax, bytes_loaded
-    add  %ax, %di                 /* 16-bit add 省前缀 */
+    add  %ax, %di                 /* DI 按簇前进 (每次 0x1000) */
+    jnc  1f                       /* 无进位 = 仍在当前 64KB 段内 */
+    /* DI 溢出: ES += 0x1000 (前进 64KB), DI 已自动回绕 */
+    mov  %es, %ax
+    add  $0x1000, %ax
+    mov  %ax, %es
+1:
 
     /* FAT 链: 下一簇 = FAT[cluster] & 0x0FFFFFFF */
     mov  cur_cluster, %eax

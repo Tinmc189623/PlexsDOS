@@ -460,3 +460,260 @@ void hal_spin_unlock(volatile uint32_t *lock)
         : "memory"
     );
 }
+
+/* ===== 块设备抽象层 ===== */
+
+/* 块设备注册表 */
+static struct hal_blkdev hal_blkdev_table[HAL_MAX_BLKDEV];
+static int hal_blkdev_count_val = 0;
+
+/*
+ * hal_blkdev_register — 注册块设备
+ * @type:      HAL_BLKDEV_FLOPPY / ATA / ATAPI
+ * @driver_id: 驱动实例号
+ * @ops:       操作函数表
+ * 返回: 设备 ID (>=0), 失败返回 -1。
+ */
+int hal_blkdev_register(uint8_t type, uint8_t driver_id,
+                        struct hal_blkdev_ops *ops)
+{
+    if (hal_blkdev_count_val >= HAL_MAX_BLKDEV)
+        return -1;
+
+    int id = hal_blkdev_count_val++;
+    hal_blkdev_table[id].type = type;
+    hal_blkdev_table[id].driver_id = driver_id;
+    hal_blkdev_table[id].ops = ops;
+    return id;
+}
+
+/*
+ * hal_blkdev_count — 获取注册的块设备数量
+ * 返回: 设备数量。
+ */
+int hal_blkdev_count(void)
+{
+    return hal_blkdev_count_val;
+}
+
+/*
+ * hal_blkdev_get — 获取块设备信息
+ * @dev_id: 设备 ID
+ * 返回: 设备指针, 无效返回 NULL。
+ */
+struct hal_blkdev *hal_blkdev_get(int dev_id)
+{
+    if (dev_id < 0 || dev_id >= hal_blkdev_count_val)
+        return NULL;
+    return &hal_blkdev_table[dev_id];
+}
+
+/*
+ * hal_blk_read — 从块设备读取扇区
+ * @dev_id: 设备 ID
+ * @lba:    起始 LBA
+ * @count:  扇区数
+ * @buf:    目标缓冲区
+ * 返回: true = 成功。
+ */
+bool hal_blk_read(int dev_id, uint32_t lba, uint8_t count, void *buf)
+{
+    struct hal_blkdev *dev = hal_blkdev_get(dev_id);
+    if (!dev || !dev->ops || !dev->ops->read)
+        return false;
+    return dev->ops->read(lba, count, buf);
+}
+
+/*
+ * hal_blk_write — 向块设备写入扇区
+ * @dev_id: 设备 ID
+ * @lba:    起始 LBA
+ * @count:  扇区数
+ * @buf:    源数据缓冲区
+ * 返回: true = 成功。
+ */
+bool hal_blk_write(int dev_id, uint32_t lba, uint8_t count, const void *buf)
+{
+    struct hal_blkdev *dev = hal_blkdev_get(dev_id);
+    if (!dev || !dev->ops || !dev->ops->write)
+        return false;
+    return dev->ops->write(lba, count, buf);
+}
+
+/* ===== 分区扫描 ===== */
+
+/* 内部: 读取 MBR/EBR 扇区 */
+static bool hal_read_sector(int dev_id, uint32_t lba, uint8_t *buf)
+{
+    return hal_blk_read(dev_id, lba, 1, buf);
+}
+
+/* MBR 分区表偏移 */
+#define MBR_PART_TABLE_OFFSET  0x1BE
+#define MBR_SIGNATURE_OFFSET   0x1FE
+#define MBR_SIGNATURE          0xAA55
+#define PARTITION_ENTRY_SIZE   16
+
+/*
+ * hal_mbr_scan — 扫描 MBR 主分区
+ * @dev_id:   块设备 ID
+ * @parts:    [输出] 分区数组
+ * @max_parts: 数组大小
+ * 返回: 找到的主分区数。
+ */
+int hal_mbr_scan(int dev_id, struct hal_part_entry *parts, int max_parts)
+{
+    uint8_t mbr[512];
+    int count = 0;
+
+    if (!hal_read_sector(dev_id, 0, mbr))
+        return 0;
+
+    /* 验证引导签名 */
+    uint16_t sig = *(uint16_t *)(mbr + MBR_SIGNATURE_OFFSET);
+    if (sig != MBR_SIGNATURE)
+        return 0;
+
+    /* 解析 4 个主分区条目 */
+    for (int i = 0; i < 4 && count < max_parts; i++) {
+        uint8_t *entry = mbr + MBR_PART_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE;
+        uint8_t type = entry[4];
+
+        if (type == PART_TYPE_EMPTY)
+            continue;
+
+        parts[count].status      = entry[0];
+        parts[count].type        = type;
+        parts[count].lba_start   = *(uint32_t *)(entry + 8);
+        parts[count].sector_count = *(uint32_t *)(entry + 12);
+
+        /* 跳过扩展分区本身, 但记住其 LBA */
+        if (type == PART_TYPE_EXTENDED || type == PART_TYPE_EXTENDED_LBA)
+            continue;
+
+        count++;
+    }
+
+    return count;
+}
+
+/*
+ * hal_extended_scan — 递归扫描扩展分区 (EBR 链)
+ * @dev_id:   块设备 ID
+ * @ebr_lba:  EBR 起始 LBA
+ * @parts:    [输出] 逻辑分区数组
+ * @max_parts: 数组大小
+ * @offset:   写入 parts 的起始索引
+ * 返回: 找到的逻辑分区数。
+ *
+ * 扩展分区由链式 EBR 组成。每个 EBR 布局与 MBR 相同(引导扇区格式),
+ * 但只有条目 1 和 2 有意义:
+ *   条目 1 → 逻辑分区 (type!=0)
+ *   条目 2 → 下一个 EBR (链指针, type=0 或为扩展分区类型)
+ */
+int hal_extended_scan(int dev_id, uint32_t ebr_lba,
+                      struct hal_part_entry *parts,
+                      int max_parts, int offset)
+{
+    uint8_t ebr[512];
+    int count = 0;
+    uint32_t current_ebr = ebr_lba;
+    uint32_t base_lba = ebr_lba; /* 第一个 EBR 的 LBA = 扩展分区的基址 */
+
+    while (count + offset < max_parts) {
+        if (!hal_read_sector(dev_id, current_ebr, ebr))
+            break;
+
+        uint16_t sig = *(uint16_t *)(ebr + MBR_SIGNATURE_OFFSET);
+        if (sig != MBR_SIGNATURE)
+            break;
+
+        /* 条目 1: 逻辑分区 */
+        {
+            uint8_t *entry = ebr + MBR_PART_TABLE_OFFSET;
+            uint8_t type = entry[4];
+            uint32_t lba = *(uint32_t *)(entry + 8);
+            uint32_t size = *(uint32_t *)(entry + 12);
+
+            if (type != PART_TYPE_EMPTY && lba != 0) {
+                int idx = offset + count;
+                if (idx < max_parts) {
+                    parts[idx].status      = entry[0];
+                    parts[idx].type        = type;
+                    /* 逻辑分区的 LBA 是相对于扩展分区基址的 */
+                    parts[idx].lba_start   = base_lba + lba;
+                    parts[idx].sector_count = size;
+                    count++;
+                }
+            }
+        }
+
+        /* 条目 2: 下一个 EBR */
+        {
+            uint8_t *entry = ebr + MBR_PART_TABLE_OFFSET + PARTITION_ENTRY_SIZE;
+            uint8_t type = entry[4];
+            uint32_t next_lba = *(uint32_t *)(entry + 8);
+
+            if (type == PART_TYPE_EXTENDED || type == PART_TYPE_EXTENDED_LBA) {
+                /* 下一个 EBR 的 LBA 是相对于扩展分区基址的 */
+                current_ebr = ebr_lba + next_lba;
+            } else {
+                break; /* 链结束 */
+            }
+        }
+    }
+
+    return count;
+}
+
+/*
+ * hal_partition_scan_all — 扫描设备上的全部分区 (主+扩展)
+ * @dev_id:   块设备 ID
+ * @parts:    [输出] 分区数组
+ * @max_parts: 数组大小
+ * 返回: 找到的全部分区数。
+ *
+ * 先扫描 MBR 主分区, 如果找到扩展分区则递归扫描其 EBR 链。
+ */
+int hal_partition_scan_all(int dev_id, struct hal_part_entry *parts,
+                           int max_parts)
+{
+    uint8_t mbr[512];
+    int count = 0;
+    uint32_t ebr_lba = 0;
+
+    if (!hal_read_sector(dev_id, 0, mbr))
+        return 0;
+
+    uint16_t sig = *(uint16_t *)(mbr + MBR_SIGNATURE_OFFSET);
+    if (sig != MBR_SIGNATURE)
+        return 0;
+
+    /* 第一遍: 解析主分区, 记住扩展分区 LBA */
+    for (int i = 0; i < 4 && count < max_parts; i++) {
+        uint8_t *entry = mbr + MBR_PART_TABLE_OFFSET + i * PARTITION_ENTRY_SIZE;
+        uint8_t type = entry[4];
+
+        if (type == PART_TYPE_EMPTY)
+            continue;
+
+        if (type == PART_TYPE_EXTENDED || type == PART_TYPE_EXTENDED_LBA) {
+            ebr_lba = *(uint32_t *)(entry + 8);
+            continue;
+        }
+
+        parts[count].status      = entry[0];
+        parts[count].type        = type;
+        parts[count].lba_start   = *(uint32_t *)(entry + 8);
+        parts[count].sector_count = *(uint32_t *)(entry + 12);
+        count++;
+    }
+
+    /* 第二遍: 如果存在扩展分区, 扫描 EBR 链 */
+    if (ebr_lba != 0 && count < max_parts) {
+        int extra = hal_extended_scan(dev_id, ebr_lba, parts, max_parts, count);
+        count += extra;
+    }
+
+    return count;
+}

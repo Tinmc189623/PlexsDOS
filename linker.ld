@@ -16,7 +16,7 @@ SECTIONS
         *(.data*)
     }
 
-    .bss : {
+    .bss 0x200000 : {
         _bss_start = ABSOLUTE(.);
         *(.bss)
         *(COMMON)

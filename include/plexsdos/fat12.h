@@ -47,6 +47,9 @@ struct fat12_dir_entry {
 /* 扇区读函数类型: 读取 count 个扇区从 LBA 到 buf */
 typedef bool (*fat12_read_fn)(uint32_t lba, uint8_t count, void *buf);
 
+/* 扇区写函数类型: 将 buf 的 count 个扇区写入 LBA 起始位置 */
+typedef bool (*fat12_write_fn)(uint32_t lba, uint8_t count, const void *buf);
+
 /*
  * fat12_init — 使用 ATA 磁盘初始化 FAT12
  * 从引导扇区 0x7C00 读取 BPB, 加载 FAT 表和根目录。
@@ -85,6 +88,36 @@ struct fat12_dir_entry *fat12_find_file(const char *name);
  * 返回: 加载的字节数, 失败返回 0。
  */
 uint32_t fat12_load_file(struct fat12_dir_entry *entry, uint32_t load_addr);
+
+/*
+ * fat12_set_write_fn — 设置扇区写函数
+ * @fn: 写函数指针 (NULL = 禁用写入)
+ */
+void fat12_set_write_fn(fat12_write_fn fn);
+
+/*
+ * fat12_write_file — 将数据写入 FAT12 文件系统 (新建/覆盖)
+ * @name: 文件名
+ * @data: 数据缓冲区
+ * @size: 数据大小
+ * 返回: true = 成功。
+ */
+bool fat12_write_file(const char *name, const uint8_t *data, uint32_t size);
+
+/*
+ * fat12_delete_file — 删除文件
+ * @name: 文件名
+ * 返回: true = 成功。
+ */
+bool fat12_delete_file(const char *name);
+
+/*
+ * fat12_rename_file — 重命名文件
+ * @old_name: 原文件名
+ * @new_name: 新文件名
+ * 返回: true = 成功。
+ */
+bool fat12_rename_file(const char *old_name, const char *new_name);
 
 #ifdef __cplusplus
 }

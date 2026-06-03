@@ -17,6 +17,8 @@ void serial_init(void);
 void serial_putchar(char c);
 void serial_puts(const char *str);
 void serial_put_hex(uint32_t val);
+int  serial_available(void);
+int  serial_getchar(void);
 
 #ifdef __cplusplus
 }

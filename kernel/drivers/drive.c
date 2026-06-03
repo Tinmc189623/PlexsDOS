@@ -3,14 +3,13 @@
  * 驱动器抽象层实现
  * 作者: Tinmc189623 | 团队: Nexlyh
  *
- * 管理多驱动器: 软盘 (A:/B:), 硬盘 (C:), CD-ROM (D:)。
+ * 管理多驱动器: A:-Z:, 支持软盘、硬盘、CD-ROM。
  * 提供驱动器注册、切换和查询功能。
  */
 
 #include <plexsdos/drive.h>
 #include <plexsdos/screen.h>
 #include <plexsdos/serial.h>
-#include <plexsdos/fat32.h>
 
 /* 驱动器表 */
 static struct drive_info drive_table[DRIVE_MAX];
@@ -26,9 +25,7 @@ static int g_current_drive = DRIVE_LETTER_C;
  */
 void drive_init(void)
 {
-    int i;
-
-    for (i = 0; i < DRIVE_MAX; i++) {
+    for (int i = 0; i < DRIVE_MAX; i++) {
         drive_table[i].type = DRIVE_TYPE_NONE;
         drive_table[i].device_id = 0;
         drive_table[i].partition_lba = 0;
@@ -38,7 +35,7 @@ void drive_init(void)
 
     g_current_drive = DRIVE_LETTER_C;
 
-    serial_puts("[drive] initialized.\n");
+    serial_puts("[drive] initialized (A:-Z: available).\n");
 }
 
 /*
@@ -51,9 +48,10 @@ int drive_get_current(void)
 
 /*
  * drive_set_current — 切换当前驱动器
- * @letter: DRIVE_LETTER_A ~ DRIVE_LETTER_D
+ * @letter: DRIVE_LETTER_A ~ DRIVE_LETTER_Z
  *
- * 切换当前驱动器。如果目标是 HDD 且已挂载, 重新初始化 FAT32。
+ * 检查驱动器是否已注册, 切换当前索引。
+ * 文件系统初始化由 fs 层负责。
  */
 bool drive_set_current(int letter)
 {
@@ -65,11 +63,6 @@ bool drive_set_current(int letter)
 
     g_current_drive = letter;
 
-    /* 如果切换到硬盘驱动器, 重新初始化 FAT32 */
-    if (drive_table[letter].type == DRIVE_TYPE_HDD) {
-        fat32_init_drive(drive_table[letter].partition_lba);
-    }
-
     serial_puts("[drive] switched to ");
     serial_putchar(drive_letter_to_char(letter));
     serial_putchar('\n');
@@ -79,7 +72,7 @@ bool drive_set_current(int letter)
 
 /*
  * drive_get_info — 获取驱动器信息
- * @letter: DRIVE_LETTER_A ~ DRIVE_LETTER_D
+ * @letter: DRIVE_LETTER_A ~ DRIVE_LETTER_Z
  */
 const struct drive_info *drive_get_info(int letter)
 {
@@ -114,6 +107,8 @@ void drive_register(int letter, uint8_t type, uint8_t device_id,
     serial_putchar(drive_letter_to_char(letter));
     serial_puts(": as ");
     serial_puts(drive_get_type_name(type));
+    serial_puts(", LBA ");
+    serial_put_hex(partition_lba);
     serial_putchar('\n');
 }
 

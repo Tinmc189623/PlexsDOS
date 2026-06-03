@@ -20,6 +20,13 @@
 /* 位图存储区 (放在内核 BSS 段之后的预留区域) */
 static uint8_t pfa_bitmap[PFA_BITMAP_SIZE];
 
+/* 链接器符号: .bss 段起止地址 (由 linker.ld 定义, ABSOLUTE 修正)
+ * 注意: GCC PE/COFF 自动为 C 符号添加前导 _,
+ * 所以 C 声明 bss_start → 目标符号 _bss_start,
+ * 匹配 linker.ld 中的 _bss_start / _bss_end。 */
+extern char bss_start[];
+extern char bss_end[];
+
 /* 系统总页数和空闲页数 */
 static uint32_t pfa_total_pages;
 static uint32_t pfa_free_pages;
@@ -71,6 +78,8 @@ static int pfa_test_bit(uint32_t page)
  *   - 页 128-145 (内核栈区, 0x80000-0x91FFF)
  *   - 页 184 (VGA 显存, 0xB8000)
  *   - 页 256-257 (页目录 + 页表 0, 0x100000-0x101000)
+ *   - 页 258 (页表 1, 0x102000)
+ *   - BSS 段所占页 (由 _bss_start/_bss_end 动态计算, 0x200000 起)
  *   - 位图自身所在页
  */
 void pfa_init(uint32_t total_pages)
@@ -82,6 +91,9 @@ void pfa_init(uint32_t total_pages)
     /* 清零位图 */
     for (i = 0; i < PFA_BITMAP_SIZE; i++)
         pfa_bitmap[i] = 0;
+
+    /* 显式初始化空闲页计数 (BSS 可能因 PE/COFF 对齐未被正确清零) */
+    pfa_free_pages = 0;
 
     /* 限制最大页数 */
     if (total_pages > PFA_MAX_PAGES)
@@ -113,9 +125,27 @@ void pfa_init(uint32_t total_pages)
     }
 
     /* 1MB 以上 (页 256+) 除页表区域外全部空闲 */
-    for (i = 258; i < total_pages; i++) {
+    for (i = 259; i < total_pages; i++) {
         pfa_clear_bit(i);
         pfa_free_pages++;
+    }
+
+    /* === 重新标记内核 BSS 页为已用 (paging identity-map 4MB 包含 BSS) ===
+     * 上述代码将 1MB 以上的页全部释放为空闲, 但内核 BSS 可延伸至 ~4MB。
+     * 必须重新保留 BSS 范围 [bss_pg_start, bss_pg_end] 的页帧,
+     * 否则 pfa_alloc_frame 可能分发 BSS 覆盖的物理页, 破坏内核数据。 */
+    {
+        uint32_t bss_addr_start = (uint32_t)(void *)bss_start;
+        uint32_t bss_addr_end   = (uint32_t)(void *)bss_end;
+        uint32_t bss_pg_start   = bss_addr_start / PAGE_SIZE;
+        uint32_t bss_pg_end     = (bss_addr_end + PAGE_SIZE - 1) / PAGE_SIZE;
+
+        for (i = bss_pg_start; i < bss_pg_end && i < total_pages; i++) {
+            if (!pfa_test_bit(i)) {
+                pfa_set_bit(i);
+                pfa_free_pages--;
+            }
+        }
     }
 
     /* 标记位图自身所在页为已用 */

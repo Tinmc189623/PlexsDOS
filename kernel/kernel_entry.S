@@ -50,6 +50,7 @@ _start:
     call serial_init
 
     /* 清零 .bss 段 (ISO/CD-ROM 启动时 BIOS 会在该区域留下垃圾数据) */
+    cld                        /* 确保方向标志为 0, stosb 正向递增 EDI */
     mov  $_bss_start, %edi
     mov  $_bss_end, %ecx
     sub  %edi, %ecx            /* ecx = _bss_end - _bss_start (字节数) */

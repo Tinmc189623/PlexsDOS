@@ -14,6 +14,7 @@
 extern void isr_default(void);
 extern void isr_keyboard(void);
 extern void isr_fdc(void);
+extern void isr_mouse(void);
 extern void idt_load(void *idt_desc);
 
 /* IDT 条目结构 (8 字节) */
@@ -78,6 +79,9 @@ void idt_init(void)
 
     /* 注册键盘中断 (IRQ1 → INT 0x21) */
     idt_set_gate(0x21, isr_keyboard);
+
+    /* 注册鼠标中断 (IRQ12 → INT 0x2C) */
+    idt_set_gate(0x2C, isr_mouse);
 
     /* 设置 IDT 描述符 */
     idt_desc.limit = (uint16_t)(sizeof(idt) - 1);
@@ -157,14 +161,13 @@ void pic_init(void)
         "out %%al, $0x21\n\t"
         "out %%al, $0xA1\n\t"
 
-        /* 屏蔽所有中断, 仅启用键盘 (IRQ1)
-         * 0xBF = 10111111: bit1=1 屏蔽了 IRQ1(键盘)!
-         * 0xBD = 10111101: 启用 IRQ1(键盘), 其余屏蔽
-         * IRQ6 (软盘) 按需由 fdc_init() 启用, 避免 BIOS 残留 FDC 中断
-         * 在内核 sti 后触发 VMware 软盘仿真时序断言崩溃 */
-        "mov $0xBD, %%al\n\t"
+        /* 屏蔽除定时器、键盘、从片级联、软盘外的所有主片中断
+         * 0xB8 = 10111000: IRQ0(定时器) IRQ1(键盘) IRQ2(从片级联) IRQ6(FDC) 启用
+         * IRQ2 必须启用才能使从片 (IRQ8-15) 中断通过
+         * 从片: 0xEF = 11101111: 启用 IRQ12(鼠标) */
+        "mov $0xB9, %%al\n\t"
         "out %%al, $0x21\n\t"
-        "mov $0xFF, %%al\n\t"
+        "mov $0xEF, %%al\n\t"
         "out %%al, $0xA1\n\t"
 
         :
