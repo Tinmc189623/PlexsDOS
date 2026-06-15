@@ -25,6 +25,11 @@ extern "C" {
 /* 页大小 */
 #define PAGE_SIZE          4096
 #define PAGE_SHIFT         12
+#define PAGE_4M_SIZE       0x400000   /* 4MB 大页 */
+#define PAGE_4M_SHIFT      22
+
+/* PDE 标志位 (页目录项) */
+#define PDE_4MB           (1 << 7)    /* Page Size: 4MB 大页 */
 
 /* ===== 分页核心 ===== */
 

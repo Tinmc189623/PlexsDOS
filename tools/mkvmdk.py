@@ -128,15 +128,17 @@ def find_qemu_img() -> str:
     sys.exit(1)
 
 
-def convert_to_vmdk(raw_path: str, vmdk_path: str) -> None:
+def convert_to_vmdk(raw_path: str, vmdk_path: str, virtual_size: int) -> None:
     """
-    将原始磁盘镜像转换为 VMDK 格式
+    将原始数据镜像转换为 VMDK 格式
 
-    使用 qemu-img convert 将 raw 镜像转换为 monolithicSparse VMDK。
+    使用 qemu-img convert 将 raw 镜像转换为 monolithicSparse VMDK,
+    指定虚拟磁盘大小。
 
     参数:
-        raw_path: 原始镜像文件路径
+        raw_path: 原始数据文件路径 (仅包含实际数据)
         vmdk_path: 输出 VMDK 文件路径
+        virtual_size: 虚拟磁盘大小 (字节)
     """
     qemu_img = find_qemu_img()
 
@@ -144,7 +146,7 @@ def convert_to_vmdk(raw_path: str, vmdk_path: str) -> None:
         qemu_img, "convert",
         "-f", "raw",
         "-O", "vmdk",
-        "-o", "subformat=monolithicSparse",
+        "-o", f"subformat=monolithicSparse,size={virtual_size}",
         raw_path,
         vmdk_path,
     ]
@@ -255,15 +257,19 @@ def main() -> None:
         all_files.append((basename, file_data))
         print(f"  {basename}: {len(file_data):,} 字节")
 
-    # 创建原始镜像 (稀疏文件)
+    # 计算实际需要写入的最大偏移 (FAT 表 + 根目录 + 所有文件)
+    # 不再创建完整的 40GB 稀疏文件, 大幅节省时间和磁盘空间
+    data_lba = PART_START_LBA + FAT32_RESERVED_SECS + FAT32_NUM_FATS * fat_sectors
+
+    # 原始镜像路径 (VMDK 的中间文件)
     raw_path = args.output
     if raw_path.endswith('.vmdk'):
         raw_path = raw_path[:-5] + '.raw'
 
-    print(f"\n[1/3] 创建原始镜像: {raw_path}")
+    print(f"\n[1/3] 创建原始缓冲镜像: {raw_path}")
+    # 创建刚好容纳所有数据的原始文件, 不再预扩展到虚拟磁盘大小
     with open(raw_path, 'wb') as f:
-        f.seek(disk_size - 1)
-        f.write(b'\x00')
+        f.truncate(64 * 1024 * 1024)
 
     # 写入磁盘结构
     print(f"\n[2/3] 写入磁盘结构...")
@@ -472,7 +478,7 @@ def main() -> None:
     if not vmdk_path.endswith('.vmdk'):
         vmdk_path += '.vmdk'
 
-    convert_to_vmdk(raw_path, vmdk_path)
+    convert_to_vmdk(raw_path, vmdk_path, disk_size)
 
     # 清理原始镜像
     if not args.keep_raw:

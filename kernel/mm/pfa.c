@@ -37,9 +37,7 @@ static uint32_t pfa_free_pages;
  */
 static void pfa_set_bit(uint32_t page)
 {
-    uint32_t byte_idx = page / 8;
-    uint8_t bit_idx = (uint8_t)(page % 8);
-    pfa_bitmap[byte_idx] |= (1 << bit_idx);
+    pfa_bitmap[page >> 3] |= (uint8_t)(1 << (page & 7));
 }
 
 /*
@@ -48,9 +46,7 @@ static void pfa_set_bit(uint32_t page)
  */
 static void pfa_clear_bit(uint32_t page)
 {
-    uint32_t byte_idx = page / 8;
-    uint8_t bit_idx = (uint8_t)(page % 8);
-    pfa_bitmap[byte_idx] &= ~(1 << bit_idx);
+    pfa_bitmap[page >> 3] &= (uint8_t)(~(1 << (page & 7)));
 }
 
 /*
@@ -60,9 +56,7 @@ static void pfa_clear_bit(uint32_t page)
  */
 static int pfa_test_bit(uint32_t page)
 {
-    uint32_t byte_idx = page / 8;
-    uint8_t bit_idx = (uint8_t)(page % 8);
-    return (pfa_bitmap[byte_idx] >> bit_idx) & 1;
+    return (pfa_bitmap[page >> 3] >> (page & 7)) & 1;
 }
 
 /*
@@ -137,8 +131,8 @@ void pfa_init(uint32_t total_pages)
     {
         uint32_t bss_addr_start = (uint32_t)(void *)bss_start;
         uint32_t bss_addr_end   = (uint32_t)(void *)bss_end;
-        uint32_t bss_pg_start   = bss_addr_start / PAGE_SIZE;
-        uint32_t bss_pg_end     = (bss_addr_end + PAGE_SIZE - 1) / PAGE_SIZE;
+        uint32_t bss_pg_start   = bss_addr_start >> PAGE_SHIFT;
+        uint32_t bss_pg_end     = (bss_addr_end + PAGE_SIZE - 1) >> PAGE_SHIFT;
 
         for (i = bss_pg_start; i < bss_pg_end && i < total_pages; i++) {
             if (!pfa_test_bit(i)) {
@@ -149,8 +143,8 @@ void pfa_init(uint32_t total_pages)
     }
 
     /* 标记位图自身所在页为已用 */
-    bitmap_page_start = (uint32_t)pfa_bitmap / PAGE_SIZE;
-    bitmap_page_end = ((uint32_t)pfa_bitmap + PFA_BITMAP_SIZE - 1) / PAGE_SIZE;
+    bitmap_page_start = (uint32_t)pfa_bitmap >> PAGE_SHIFT;
+    bitmap_page_end = ((uint32_t)pfa_bitmap + PFA_BITMAP_SIZE - 1) >> PAGE_SHIFT;
     for (i = bitmap_page_start; i <= bitmap_page_end; i++) {
         if (i < total_pages && !pfa_test_bit(i)) {
             pfa_set_bit(i);
@@ -175,13 +169,24 @@ void pfa_init(uint32_t total_pages)
  */
 uint32_t pfa_alloc_frame(void)
 {
-    uint32_t i;
+    uint32_t byte_idx, bit_idx;
 
-    for (i = 0; i < pfa_total_pages; i++) {
-        if (!pfa_test_bit(i)) {
-            pfa_set_bit(i);
-            pfa_free_pages--;
-            return i * PAGE_SIZE;
+    /* 逐字节扫描, 跳过满字节 (0xFF) */
+    uint32_t max_bytes = (pfa_total_pages + 7) >> 3;
+    for (byte_idx = 0; byte_idx < max_bytes; byte_idx++) {
+        uint8_t byte = pfa_bitmap[byte_idx];
+        if (byte != 0xFF) {
+            /* 找到第一个空闲位 */
+            for (bit_idx = 0; bit_idx < 8; bit_idx++) {
+                if (!(byte & (1 << bit_idx))) {
+                    uint32_t page = (byte_idx << 3) | bit_idx;
+                    if (page >= pfa_total_pages)
+                        return 0;
+                    pfa_bitmap[byte_idx] |= (uint8_t)(1 << bit_idx);
+                    pfa_free_pages--;
+                    return page << PAGE_SHIFT;
+                }
+            }
         }
     }
 
@@ -196,7 +201,7 @@ uint32_t pfa_alloc_frame(void)
  */
 void pfa_free_frame(uint32_t frame_addr)
 {
-    uint32_t page = frame_addr / PAGE_SIZE;
+    uint32_t page = frame_addr >> PAGE_SHIFT;
 
     if (page >= pfa_total_pages)
         return;

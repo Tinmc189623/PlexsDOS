@@ -34,8 +34,30 @@
 #include <plexsdos/mouse.h>
 #include <plexsdos/ahci.h>
 
+/*
+ * print_banner — 打印带框标题横幅
+ * @title: 主标题 (居中)
+ * @subtitle: 副标题 (居中, 可 NULL)
+ *
+ * 青色文字 + 分隔线, 之后恢复默认颜色。
+ */
+static void print_banner(const char *title, const char *subtitle)
+{
+    screen_set_color(0x03, 0x00);  /* 青色 */
+    screen_puts("\n");
+    screen_puts("  ============================================\n");
+    screen_puts(title);
+    if (subtitle)
+        screen_puts(subtitle);
+    screen_puts("  ============================================\n");
+    screen_set_color(0x07, 0x00);
+}
+
 /* 启动驱动器号 (由 kernel_entry.S 从 BIOS DL 寄存器保存) */
 extern uint8_t boot_drive;
+
+/* 内存操作分派初始化 (lib/fast_mem.c) */
+extern void fast_mem_init(void);
 
 /* FDC 块设备操作包装 (去除 drive 参数) */
 static bool fdc0_read(uint32_t lba, uint8_t count, void *buf)
@@ -64,13 +86,18 @@ static bool ahci_write_wrap(uint32_t lba, uint8_t count, const void *buf)
  *
  * 写入第一行指定位置, 白色前景, 黑色背景。
  * 用于在串口不可用时追踪内核初始化进度。
+ * MINIMAL_KERNEL 构建中编译为 no-op。
  */
+#ifdef MINIMAL_KERNEL
+#define vga_dbg(pos, c) ((void)0)
+#else
 static void vga_dbg(int pos, char c)
 {
     volatile char *vga = (volatile char *)0xB8000;
     vga[pos * 2] = c;
     vga[pos * 2 + 1] = 0x0F;
 }
+#endif
 
 /*
  * kernel_main — 内核 C 语言主函数
@@ -107,19 +134,15 @@ void kernel_main(void)
     vga_dbg(0, 'S');
     serial_puts("[PlexsDOS] screen OK.\n");
 
-    screen_set_color(0x03, 0x00);  /* 青色 */
-    screen_puts("\n");
-    screen_puts("  ============================================\n");
-    screen_puts("        Nexsteaduser PlexsDOS  v0.1\n");
-    screen_puts("        x86 32-bit  Protected Mode OS\n");
-    screen_puts("  ============================================\n");
-    screen_set_color(0x07, 0x00);
+    print_banner("        Nexsteaduser PlexsDOS  v0.1\n",
+                 "        x86 32-bit  Protected Mode OS\n");
     serial_puts("[PlexsDOS] system started.\n");
 
     /* ---- CPU 初始化 ---- */
     cpu_init();
     vga_dbg(1, 'C');
     serial_puts("[PlexsDOS] CPU OK.\n");
+    fast_mem_init();  /* 缓存最优内存操作路径 */
     screen_set_color(0x0A, 0x00);  /* 绿色 OK */
     screen_puts("  [OK]");
     screen_set_color(0x07, 0x00);
@@ -410,12 +433,7 @@ void kernel_main(void)
     /* ---- 启动完成横幅 ---- */
     vga_dbg(15, '!');
     serial_puts("[PlexsDOS] system ready.\n");
-    screen_set_color(0x03, 0x00);
-    screen_puts("\n");
-    screen_puts("  ============================================\n");
-    screen_puts("       Nexsteaduser PlexsDOS  System Ready\n");
-    screen_puts("  ============================================\n");
-    screen_set_color(0x07, 0x00);
+    print_banner("       Nexsteaduser PlexsDOS  System Ready\n", NULL);
     screen_putchar('\n');
 
     /*
@@ -464,12 +482,7 @@ void kernel_main(void)
     }
 
     /* 正常启动 Shell */
-    screen_set_color(0x03, 0x00);
-    screen_puts("\n");
-    screen_puts("  ============================================\n");
-    screen_puts("       Welcome to Nexsteaduser PlexsDOS\n");
-    screen_puts("  ============================================\n");
-    screen_set_color(0x07, 0x00);
+    print_banner("       Welcome to Nexsteaduser PlexsDOS\n", NULL);
     screen_putchar('\n');
     shell_main();
 }

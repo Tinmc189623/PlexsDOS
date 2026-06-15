@@ -13,11 +13,11 @@
 #   plexsdos-x86_32-0.1-beta-install_disks_04.img — 安装盘 4 (驱动/库)
 #   plexsdos-x86_32-0.1-beta-install_disks_05.img — 安装盘 5 (文档/示例)
 
-CC      = /c/msys64/mingw32/bin/gcc
-CXX     = /c/msys64/mingw32/bin/g++
-AS      = /c/msys64/mingw32/bin/as
-LD      = /c/msys64/mingw32/bin/ld
-OBJCOPY = /c/msys64/mingw32/bin/objcopy
+CC      = gcc
+CXX     = g++
+AS      = as
+LD      = ld
+OBJCOPY = objcopy
 PYTHON  = /c/Users/Tindo/AppData/Local/Python/bin/python.exe
 
 # i686 基线: CMOV, FPU, TSC — 所有 32-bit x86 处理器通用
@@ -26,8 +26,9 @@ CFLAGS   = -m32 -march=i686 \
            -ffreestanding -fno-builtin -nostdlib \
            -fno-stack-check -fno-stack-protector \
            -fno-asynchronous-unwind-tables \
-           -Wall -Wextra -std=c23 -Os -Iinclude \
-           -DMINIMAL_KERNEL
+           -Wall -Wextra -std=c23 -O2 -Iinclude \
+           -DMINIMAL_KERNEL \
+           -MMD -MP
 
 # C++ 编译: 无异常、无 RTTI、无线程安全静态、freestanding
 CXXFLAGS = -m32 -march=i686 \
@@ -35,7 +36,8 @@ CXXFLAGS = -m32 -march=i686 \
            -fno-exceptions -fno-rtti -fno-threadsafe-statics \
            -fno-stack-check -fno-stack-protector \
            -fno-asynchronous-unwind-tables \
-           -Wall -Wextra -std=c++23 -Os -Iinclude
+           -Wall -Wextra -std=c++23 -O2 -Iinclude \
+           -MMD -MP
 
 ASFLAGS  = --32 -Iinclude
 LD_KERN  = -m i386pe -T linker.ld --image-base 0x0 -nostdlib -N --section-alignment 0x200
@@ -43,6 +45,10 @@ LD_KERN  = -m i386pe -T linker.ld --image-base 0x0 -nostdlib -N --section-alignm
 export TEMP = C:\Users\Tindo\tmp
 export TMP  = C:\Users\Tindo\tmp
 export PATH := /c/msys64/mingw32/bin:$(PATH)
+
+# 自动依赖文件 (.d), 与目标 .o 文件一一对应
+DEPFILES = $(OBJS:.o=.d)
+-include $(DEPFILES)
 
 BUILD_DIR  = build
 
@@ -106,13 +112,11 @@ PROG_PNP_EXE = $(BUILD_DIR)/programs/pnp.exe
 PROG_PNP_BIN = $(BUILD_DIR)/programs/PNP.BIN
 PROG_PNP_COMX = $(BUILD_DIR)/programs/PNP.COMX
 
-# 安装软盘镜像
+# 安装软盘镜像 (3 张: 启动盘 + 系统盘 + 程序盘)
 INSTALL_BASE = plexsdos-x86_32-0.1-beta-install_disks
 DISK1_IMG = $(BUILD_DIR)/$(INSTALL_BASE)_01.img
 DISK2_IMG = $(BUILD_DIR)/$(INSTALL_BASE)_02.img
 DISK3_IMG = $(BUILD_DIR)/$(INSTALL_BASE)_03.img
-DISK4_IMG = $(BUILD_DIR)/$(INSTALL_BASE)_04.img
-DISK5_IMG = $(BUILD_DIR)/$(INSTALL_BASE)_05.img
 
 # ISO 9660 可引导光盘镜像 (El Torito 2.88MB 软盘仿真)
 ISO_IMG = $(BUILD_DIR)/plexsdos.iso
@@ -122,8 +126,10 @@ VMDK_IMG = $(BUILD_DIR)/plexsdos.vmdk
 
 .PHONY: all clean run run-floppy run-iso disk install-disks iso vmdk
 
-all: $(FLOPPY_IMG) $(DISK_IMG) $(ISO_IMG) $(DISK1_IMG) $(DISK2_IMG) $(DISK3_IMG) $(DISK4_IMG) $(DISK5_IMG)
+all: $(FLOPPY_IMG) $(DISK_IMG) $(ISO_IMG) $(DISK1_IMG) $(DISK2_IMG) $(DISK3_IMG)
 
+# 通用编译规则 (GAS 汇编 / C / C++), 自动生成 .d 依赖文件
+# 支持 make -jN 并行构建
 $(BUILD_DIR)/%.o: %.S
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
@@ -166,7 +172,7 @@ $(HD_VBR_BIN): boot/hd_vbr.S
 	$(OBJCOPY) -O binary -j .text $(BUILD_DIR)/hd_vbr.elf $@
 	$(PYTHON) tools/fix_vbr.py $@
 
-# 内核链接 (MBR/VBR 通过 hd_boot.S 的 .incbin 嵌入)
+# 内核链接 + strip 去符号 (MBR/VBR 通过 hd_boot.S 的 .incbin 嵌入)
 $(KERNEL_BIN): $(KERN_OBJS) $(HD_MBR_BIN) $(HD_VBR_BIN)
 	$(LD) $(LD_KERN) $(KERN_OBJS) -o $(BUILD_DIR)/kernel.exe
 	$(OBJCOPY) -O binary -j .text -j .rdata -j .rodata -j .data $(BUILD_DIR)/kernel.exe $@
@@ -219,23 +225,15 @@ $(DISK1_IMG): $(BOOT_BIN) $(KERNEL_BIN)
 $(DISK2_IMG): $(KERNEL_BIN)
 	$(PYTHON) tools/mkfat12.py $@ $(KERNEL_BIN)
 
-# 3 号盘: 程序文件
-$(DISK3_IMG): $(PROG_HELLO_COMX) $(PROG_PNP_COMX)
-	$(PYTHON) tools/mkfat12.py $@ $(PROG_HELLO_COMX) $(PROG_PNP_COMX)
-
-# 4 号盘: 驱动/库 (预留, 创建空盘)
-$(DISK4_IMG):
-	$(PYTHON) tools/mkfat12.py $@
-
-# 5 号盘: 文档
-$(DISK5_IMG): programs/README.TXT
-	$(PYTHON) tools/mkfat12.py $@ programs/README.TXT
+# 3 号盘: 程序 + 文档
+$(DISK3_IMG): $(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
+	$(PYTHON) tools/mkfat12.py $@ $(PROG_HELLO_COMX) $(PROG_PNP_COMX) programs/README.TXT
 
 # 仅构建磁盘镜像
 disk: $(DISK_IMG)
 
 # 仅构建安装盘
-install-disks: $(DISK1_IMG) $(DISK2_IMG) $(DISK3_IMG) $(DISK4_IMG) $(DISK5_IMG)
+install-disks: $(DISK1_IMG) $(DISK2_IMG) $(DISK3_IMG)
 
 # ISO 9660 可引导光盘镜像 (El Torito 2.88MB 软盘仿真)
 # 替代 5 张安装软盘, 所有文件统一放在 ISO 中
@@ -277,3 +275,4 @@ run-iso-only: $(ISO_IMG)
 
 clean:
 	rm -rf $(BUILD_DIR)
+	@echo "Cleaned build directory and dependency files."

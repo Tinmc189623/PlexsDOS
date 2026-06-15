@@ -9,10 +9,21 @@
  * - AVX:  VMOVDQA 256-bit 块操作 (Sandy Bridge+)
  *
  * 使用 target 属性启用 SIMD 寄存器, 实际指令在运行时检测后执行。
+ * 分派结果缓存为函数指针, 避免每次调用的分支开销。
  */
 
 #include <plexsdos/types.h>
 #include <plexsdos/cpu.h>
+
+/* 函数指针类型定义 */
+typedef void *(*memcpy_fn_t)(void *, const void *, size_t);
+typedef void *(*memset_fn_t)(void *, int, size_t);
+typedef int   (*memcmp_fn_t)(const void *, const void *, size_t);
+
+/* 缓存的实现函数指针 (由 fast_mem_init 设置, 之后只读) */
+static memcpy_fn_t memcpy_impl = NULL;
+static memset_fn_t memset_impl = NULL;
+static memcmp_fn_t memcmp_impl = NULL;
 
 /* 基线路径: REP MOVSD (所有 i486+ 处理器) */
 static void *memcpy_baseline(void *dst, const void *src, size_t n)
@@ -164,22 +175,134 @@ static void *memcpy_avx(void *dst, const void *src, size_t n)
     return dst;
 }
 
+/* 前向声明: 各 SIMD 路径的静态实现 (定义在 fast_mem_init 之后) */
+static void *memcpy_sse2(void *dst, const void *src, size_t n);
+static void *memcpy_avx(void *dst, const void *src, size_t n);
+static void *memset_baseline(void *dst, int c, size_t n);
+static void *memset_sse2(void *dst, int c, size_t n);
+static void *memset_avx(void *dst, int c, size_t n);
+static int memcmp_sse2(const void *s1, const void *s2, size_t n);
+
+/*
+ * fast_mem_init — 初始化内存操作分派
+ *
+ * 在 cpu_init() 之后调用一次, 缓存最优实现函数指针。
+ * 之后 fast_memcpy/memset/memcmp 直接通过指针调用, 零分支开销。
+ */
+void fast_mem_init(void)
+{
+    if (cpu_has_group(CPU_GROUP_AVX)) {
+        memcpy_impl = memcpy_avx;
+        memset_impl = memset_avx;
+    } else if (cpu_has_feature(CPU_FEATURE_SSE2)) {
+        memcpy_impl = memcpy_sse2;
+        memset_impl = memset_sse2;
+    } else {
+        memcpy_impl = memcpy_baseline;
+        memset_impl = memset_baseline;
+    }
+
+    if (cpu_has_feature(CPU_FEATURE_SSE2))
+        memcmp_impl = memcmp_sse2;
+    else
+        memcmp_impl = NULL;  /* 使用内联基线 */
+}
+
 /*
  * fast_memcpy — 优化内存拷贝
  * @dst: 目标地址
  * @src: 源地址
  * @n: 字节数
  *
- * 运行时分派到最优路径。
+ * 通过缓存的函数指针零开销分派。
  * 返回: dst 指针。
  */
 void *fast_memcpy(void *dst, const void *src, size_t n)
 {
-    if (cpu_has_group(CPU_GROUP_AVX))
-        return memcpy_avx(dst, src, n);
-    if (cpu_has_feature(CPU_FEATURE_SSE2))
-        return memcpy_sse2(dst, src, n);
-    return memcpy_baseline(dst, src, n);
+    return memcpy_impl(dst, src, n);
+}
+
+/*
+ * fast_memset — 优化内存填充
+ * @dst: 目标地址
+ * @c: 填充值
+ * @n: 字节数
+ *
+ * 通过缓存的函数指针零开销分派。
+ * 返回: dst 指针。
+ */
+void *fast_memset(void *dst, int c, size_t n)
+{
+    return memset_impl(dst, c, n);
+}
+
+/*
+ * fast_memcmp — 优化内存比较
+ * @s1: 第一个缓冲区
+ * @s2: 第二个缓冲区
+ * @n: 比较字节数
+ *
+ * 返回: 0 = 相等, 非零 = 不等。
+ */
+int fast_memcmp(const void *s1, const void *s2, size_t n)
+{
+    if (memcmp_impl && n >= 16)
+        return memcmp_impl(s1, s2, n);
+
+    /* 内联基线 (通常被 fast_mem_init 设置后走上面的路径) */
+    const uint8_t *p1 = (const uint8_t *)s1;
+    const uint8_t *p2 = (const uint8_t *)s2;
+
+    while (n >= 4) {
+        uint32_t a = *(const uint32_t *)p1;
+        uint32_t b = *(const uint32_t *)p2;
+        if (a != b) break;
+        p1 += 4;
+        p2 += 4;
+        n -= 4;
+    }
+
+    while (n--) {
+        if (*p1 != *p2)
+            return (int)*p1 - (int)*p2;
+        p1++;
+        p2++;
+    }
+    return 0;
+}
+
+/* SSE2 路径: 16字节比较 */
+__attribute__((target("sse2")))
+static int memcmp_sse2(const void *s1, const void *s2, size_t n)
+{
+    const uint8_t *p1 = (const uint8_t *)s1;
+    const uint8_t *p2 = (const uint8_t *)s2;
+
+    while (n >= 16) {
+        uint32_t result;
+        __asm__ __volatile__(
+            "movdqu (%1), %%xmm0\n\t"
+            "movdqu (%2), %%xmm1\n\t"
+            "pcmpeqb %%xmm1, %%xmm0\n\t"
+            "pmovmskb %%xmm0, %0\n\t"
+            : "=r"(result)
+            : "r"(p1), "r"(p2)
+            : "xmm0", "xmm1"
+        );
+        if (result != 0xFFFF)
+            break;
+        p1 += 16;
+        p2 += 16;
+        n -= 16;
+    }
+
+    while (n--) {
+        if (*p1 != *p2)
+            return (int)*p1 - (int)*p2;
+        p1++;
+        p2++;
+    }
+    return 0;
 }
 
 /* 基线路径: REP STOSD */
@@ -331,90 +454,4 @@ static void *memset_avx(void *dst, int c, size_t n)
 
     while (n--) *d++ = val;
     return dst;
-}
-
-/*
- * fast_memset — 优化内存填充
- * @dst: 目标地址
- * @c: 填充值
- * @n: 字节数
- *
- * 运行时分派到最优路径。
- * 返回: dst 指针。
- */
-void *fast_memset(void *dst, int c, size_t n)
-{
-    if (cpu_has_group(CPU_GROUP_AVX))
-        return memset_avx(dst, c, n);
-    if (cpu_has_feature(CPU_FEATURE_SSE2))
-        return memset_sse2(dst, c, n);
-    return memset_baseline(dst, c, n);
-}
-
-/* SSE2 路径: 16字节比较 */
-__attribute__((target("sse2")))
-static int memcmp_sse2(const void *s1, const void *s2, size_t n)
-{
-    const uint8_t *p1 = (const uint8_t *)s1;
-    const uint8_t *p2 = (const uint8_t *)s2;
-
-    while (n >= 16) {
-        uint32_t result;
-        __asm__ __volatile__(
-            "movdqu (%1), %%xmm0\n\t"
-            "movdqu (%2), %%xmm1\n\t"
-            "pcmpeqb %%xmm1, %%xmm0\n\t"
-            "pmovmskb %%xmm0, %0\n\t"
-            : "=r"(result)
-            : "r"(p1), "r"(p2)
-            : "xmm0", "xmm1"
-        );
-        if (result != 0xFFFF)
-            break;
-        p1 += 16;
-        p2 += 16;
-        n -= 16;
-    }
-
-    while (n--) {
-        if (*p1 != *p2)
-            return (int)*p1 - (int)*p2;
-        p1++;
-        p2++;
-    }
-    return 0;
-}
-
-/*
- * fast_memcmp — 优化内存比较
- * @s1: 第一个缓冲区
- * @s2: 第二个缓冲区
- * @n: 比较字节数
- *
- * 返回: 0 = 相等, 非零 = 不等。
- */
-int fast_memcmp(const void *s1, const void *s2, size_t n)
-{
-    if (cpu_has_feature(CPU_FEATURE_SSE2) && n >= 16)
-        return memcmp_sse2(s1, s2, n);
-
-    const uint8_t *p1 = (const uint8_t *)s1;
-    const uint8_t *p2 = (const uint8_t *)s2;
-
-    while (n >= 4) {
-        uint32_t a = *(const uint32_t *)p1;
-        uint32_t b = *(const uint32_t *)p2;
-        if (a != b) break;
-        p1 += 4;
-        p2 += 4;
-        n -= 4;
-    }
-
-    while (n--) {
-        if (*p1 != *p2)
-            return (int)*p1 - (int)*p2;
-        p1++;
-        p2++;
-    }
-    return 0;
 }

@@ -56,8 +56,18 @@ KSEC_MARKER = b'KSEC'
 DEFAULT_VOLUME_LABEL = "PLXSDOS"
 DEFAULT_SYSTEM_ID = "PLEXSDOS"
 
-# xorriso 可执行路径 (通过 WSL2 调用)
-XORRISO_CMD = ["wsl", "-e", "xorriso"]
+# xorriso 可执行路径 (自动检测 WSL/原生环境)
+import platform as _platform
+
+def _find_xorriso_cmd() -> list:
+    """检测并返回 xorriso 命令行"""
+    # 如果已经在 WSL 内, 直接用原生 xorriso
+    if _platform.system() == 'Linux' and 'microsoft' in _platform.release().lower():
+        return ['xorriso']
+    # Windows 下通过 wsl 调用 xorriso
+    return ['wsl', '-e', 'xorriso']
+
+XORRISO_CMD = _find_xorriso_cmd()
 
 
 # ==================== FAT12 引导映像 ====================

@@ -18,6 +18,7 @@ extern "C" {
 
 /* ===== CPU 特性标志 (CPUID leaf 1 EDX) ===== */
 #define CPU_FEATURE_FPU     (1 << 0)    /* x87 FPU */
+#define CPU_FEATURE_PSE     (1 << 3)    /* Page Size Extension (4MB pages) */
 #define CPU_FEATURE_TSC     (1 << 4)    /* Time Stamp Counter */
 #define CPU_FEATURE_CMOV    (1 << 15)   /* Conditional Move (i686+) */
 #define CPU_FEATURE_MMX     (1 << 23)   /* MultiMedia Extensions */
@@ -49,6 +50,7 @@ extern "C" {
 #define CPU_FEATURE_ABM     (1 << 5)    /* AMD Advanced Bit Manipulation (LZCNT) */
 
 /* ===== CR4 寄存器位 ===== */
+#define CR4_PSE         (1 << 4)    /* Page Size Extension (4MB pages) */
 #define CR4_OSFXSR      (1 << 9)    /* OS FXSAVE/FXRSTOR 支持 */
 #define CR4_OSXMMEXCPT  (1 << 10)   /* OS SIMD 异常处理 */
 #define CR4_OSXSAVE     (1 << 18)   /* OS XSAVE 支持 (AVX 需要) */

@@ -12,6 +12,7 @@
 #include <plexsdos/paging.h>
 #include <plexsdos/config.h>
 #include <plexsdos/types.h>
+#include <plexsdos/cpu.h>
 #include <plexsdos/screen.h>
 #include <plexsdos/serial.h>
 
@@ -41,6 +42,10 @@ void paging_init(void)
 {
     uint32_t i;
     uint32_t flags;
+    bool has_pse;
+
+    /* 检测 PSE 支持 */
+    has_pse = cpu_has_feature(CPU_FEATURE_PSE);
 
     /* 清零页目录 */
     for (i = 0; i < 1024; i++)
@@ -50,7 +55,7 @@ void paging_init(void)
     for (i = 0; i < 1024; i++)
         page_table_0[i] = 0;
 
-    /* 恒等映射前 4MB (1024 个 4KB 页) */
+    /* 恒等映射前 4MB (1024 个 4KB 页, 需要 4KB 粒度以支持混合 U/S 标志) */
     for (i = 0; i < 1024; i++) {
         /* 默认: Supervisor, writable */
         flags = PAGE_PRESENT | PAGE_WRITABLE;
@@ -70,8 +75,15 @@ void paging_init(void)
     /* 页目录条目 0 → 页表 0 */
     page_directory[0] = (uint32_t)page_table_0 | PAGE_PRESENT | PAGE_WRITABLE;
 
-    /* 页表 1 在 0x102000, 映射 4-6MB 覆盖 BSS (0x200000 起, 约 4MB 大小) */
-    {
+    if (has_pse) {
+        /*
+         * PSE 优化: 4-8MB 用单个 4MB 大页映射 (Supervisor, writable)
+         * 消除 page_table_1 及其 1024 个 PTE 的设置开销
+         */
+        page_directory[1] = PAGE_4M_SIZE | PAGE_PRESENT | PAGE_WRITABLE | PDE_4MB;
+        serial_puts("[paging] PSE enabled: 4-8MB identity-mapped with 4MB page\n");
+    } else {
+        /* 回退: 页表 1 在 0x102000, 映射 4-6MB 覆盖 BSS (0x200000 起) */
         uint32_t *page_table_1 = (uint32_t *)0x102000;
         for (i = 0; i < 1024; i++)
             page_table_1[i] = 0;
@@ -79,6 +91,16 @@ void paging_init(void)
             page_table_1[i - 1024] = (i * PAGE_SIZE) | PAGE_PRESENT | PAGE_WRITABLE;
         }
         page_directory[1] = (uint32_t)page_table_1 | PAGE_PRESENT | PAGE_WRITABLE;
+    }
+
+    /* 启用 CR4.PSE (如果支持) */
+    if (has_pse) {
+        __asm__ __volatile__(
+            "mov %%cr4, %%eax\n\t"
+            "or  %0, %%eax\n\t"
+            "mov %%eax, %%cr4"
+            : : "i"(CR4_PSE) : "eax", "memory"
+        );
     }
 
     /* 设置 CR3 = 页目录物理地址 */
