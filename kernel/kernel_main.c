@@ -33,6 +33,7 @@
 #include <plexsdos/isa.h>
 #include <plexsdos/mouse.h>
 #include <plexsdos/ahci.h>
+#include <plexsdos/config_sys.h>
 
 /*
  * print_banner — 打印带框标题横幅
@@ -137,6 +138,32 @@ void kernel_main(void)
     print_banner("        Nexsteaduser PlexsDOS  v0.1\n",
                  "        x86 32-bit  Protected Mode OS\n");
     serial_puts("[PlexsDOS] system started.\n");
+
+    /* ---- 解析 CONFIG.SYS ---- */
+    config_sys_init();
+    {
+        /*
+         * CONFIG.SYS 内嵌在引导扇区之后的内核数据区。
+         * 实际部署中由引导加载器从磁盘加载, 此处在编译时嵌入。
+         */
+        extern const char binary_programs_CONFIG_SYS_start[];
+        extern const char binary_programs_CONFIG_SYS_end[];
+        int cfg_len = (int)(binary_programs_CONFIG_SYS_end -
+                            binary_programs_CONFIG_SYS_start);
+        if (cfg_len > 0 && cfg_len < 4096) {
+            /* 复制到栈缓冲区 (避免修改原始数据) */
+            char cfg_buf[4096];
+            int i;
+            for (i = 0; i < cfg_len; i++)
+                cfg_buf[i] = binary_programs_CONFIG_SYS_start[i];
+            cfg_buf[cfg_len] = '\0';
+            config_sys_parse(cfg_buf);
+            screen_set_color(0x0A, 0x00);
+            screen_puts("  [OK]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" CONFIG.SYS loaded\n");
+        }
+    }
 
     /* ---- CPU 初始化 ---- */
     cpu_init();

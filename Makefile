@@ -84,8 +84,7 @@ OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(SRCS_S)) \
         $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(SRCS_CXX))
 
 BOOT_OBJ  = $(BUILD_DIR)/boot/boot_sector.o
-# 排除 boot/ 目录下的所有 .o (它们是独立的引导扇区, 通过 hd_boot.S 的 .incbin 嵌入内核)
-KERN_OBJS = $(filter-out $(BUILD_DIR)/boot/%,$(OBJS))
+KERN_OBJS = $(filter-out $(BUILD_DIR)/boot/%,$(OBJS)) $(CONFIG_SYS_O)
 
 BOOT_BIN   = $(BUILD_DIR)/boot.bin
 KERNEL_BIN = $(BUILD_DIR)/kernel.bin
@@ -104,6 +103,10 @@ PROG_HELLO_O   = $(BUILD_DIR)/programs/test_hello.o
 PROG_HELLO_EXE = $(BUILD_DIR)/programs/test_hello.exe
 PROG_HELLO_BIN = $(BUILD_DIR)/programs/HELLO.BIN
 PROG_HELLO_COMX = $(BUILD_DIR)/programs/HELLO.COMX
+
+# CONFIG.SYS 启动配置文件 (嵌入内核二进制)
+CONFIG_SYS_SRC = programs/CONFIG.SYS
+CONFIG_SYS_O   = $(BUILD_DIR)/programs/config_sys_embed.o
 
 # PnP 管理器
 PROG_PNP_SRC = programs/pnp.S
@@ -145,6 +148,11 @@ $(BUILD_DIR)/%.o: %.c
 $(BUILD_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# 将 CONFIG.SYS 文本文件转为 .o (通过 objcopy 嵌入为二进制符号)
+$(BUILD_DIR)/programs/config_sys_embed.o: programs/CONFIG.SYS
+	@mkdir -p $(dir $@)
+	$(OBJCOPY) -I binary -O pe-i386 -B i386 $< $@
 
 # hd_boot.S 使用 .incbin 嵌入 MBR/VBR 二进制, 必须先编译 MBR/VBR
 $(BUILD_DIR)/kernel/hd_boot.o: kernel/hd_boot.S $(HD_MBR_BIN) $(HD_VBR_BIN)

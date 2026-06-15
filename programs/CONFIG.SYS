@@ -1,0 +1,26 @@
+; Nexsteaduser PlexsDOS — 启动配置文件
+; 作者: Tinmc189623 | 团队: Nexlyh
+; 语法: COMMAND=VALUE (大小写不敏感)
+; 注释: ; 或 # 开头
+
+; === 系统参数 ===
+FILES=20
+BUFFERS=10
+LASTDRIVE=G
+
+; === 中断控制 ===
+BREAK=ON
+
+; === 启动显示 ===
+ECHO=ON
+
+; === 内存策略 ===
+DOS=LOW
+
+; === 命令解释器 (空 = 内置 Shell) ===
+SHELL=
+
+; === 可加载驱动 (按顺序加载) ===
+; DEVICE=C:\DRIVERS\HIMEM.DRV
+; DEVICE=C:\DRIVERS\EMM386.DRV
+; DEVICE=C:\DRIVERS\CDROM.DRV
