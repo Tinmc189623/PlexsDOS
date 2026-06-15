@@ -16,6 +16,9 @@ extern "C" {
 /* 计算字符串长度 (不含 null) */
 size_t strlen(const char *str);
 
+/* 内存填充 — 快速版本 (SSE2/AVX 分派) */
+void *fast_memset(void *dst, int val, size_t n);
+
 /* 内存填充 */
 void *memset(void *dst, int val, size_t n);
 

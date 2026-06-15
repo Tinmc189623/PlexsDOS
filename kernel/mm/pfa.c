@@ -12,6 +12,7 @@
 #include <plexsdos/config.h>
 #include <plexsdos/types.h>
 #include <plexsdos/screen.h>
+#include <plexsdos/string.h>
 
 /* 位图大小: 4KB = 32768 位, 可管理 128MB 物理内存 */
 #define PFA_BITMAP_SIZE   4096
@@ -83,8 +84,7 @@ void pfa_init(uint32_t total_pages)
     uint32_t bitmap_page_end;
 
     /* 清零位图 */
-    for (i = 0; i < PFA_BITMAP_SIZE; i++)
-        pfa_bitmap[i] = 0;
+    fast_memset(pfa_bitmap, 0, PFA_BITMAP_SIZE);
 
     /* 显式初始化空闲页计数 (BSS 可能因 PE/COFF 对齐未被正确清零) */
     pfa_free_pages = 0;
@@ -96,8 +96,7 @@ void pfa_init(uint32_t total_pages)
     pfa_total_pages = total_pages;
 
     /* 标记所有页为已用 (保守策略), 然后释放可用区域 */
-    for (i = 0; i < PFA_BITMAP_SIZE; i++)
-        pfa_bitmap[i] = 0xFF;
+    fast_memset(pfa_bitmap, 0xFF, PFA_BITMAP_SIZE);
 
     /* 释放空闲页: 从 0x98000 到 0xFFFFF (排除已知使用区域) */
     /* 页 0x51-0x7F: 内核 BSS 扩展区 — 已用 (保持标记) */

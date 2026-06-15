@@ -12,6 +12,7 @@
 #include <plexsdos/paging.h>
 #include <plexsdos/config.h>
 #include <plexsdos/types.h>
+#include <plexsdos/string.h>
 #include <plexsdos/cpu.h>
 #include <plexsdos/screen.h>
 #include <plexsdos/serial.h>
@@ -48,12 +49,10 @@ void paging_init(void)
     has_pse = cpu_has_feature(CPU_FEATURE_PSE);
 
     /* 清零页目录 */
-    for (i = 0; i < 1024; i++)
-        page_directory[i] = 0;
+    fast_memset(page_directory, 0, 4096);
 
     /* 清零页表 0 */
-    for (i = 0; i < 1024; i++)
-        page_table_0[i] = 0;
+    fast_memset(page_table_0, 0, 4096);
 
     /* 恒等映射前 4MB (1024 个 4KB 页, 需要 4KB 粒度以支持混合 U/S 标志) */
     for (i = 0; i < 1024; i++) {
@@ -85,8 +84,7 @@ void paging_init(void)
     } else {
         /* 回退: 页表 1 在 0x102000, 映射 4-6MB 覆盖 BSS (0x200000 起) */
         uint32_t *page_table_1 = (uint32_t *)0x102000;
-        for (i = 0; i < 1024; i++)
-            page_table_1[i] = 0;
+        fast_memset(page_table_1, 0, 4096);
         for (i = 1024; i < 1536; i++) {
             page_table_1[i - 1024] = (i * PAGE_SIZE) | PAGE_PRESENT | PAGE_WRITABLE;
         }
@@ -240,8 +238,7 @@ int page_map(uint32_t vaddr, uint32_t paddr, uint32_t flags)
 
         /* 清零新页表 */
         pt = (uint32_t *)new_pt_phys;
-        for (int i = 0; i < 1024; i++)
-            pt[i] = 0;
+        fast_memset(pt, 0, 4096);
 
         /* 设置页目录条目 (supervisor, writable, present) */
         page_directory[pd_idx] = new_pt_phys | PAGE_PRESENT | PAGE_WRITABLE;

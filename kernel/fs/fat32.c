@@ -275,11 +275,11 @@ static uint32_t fat32_get_next_cluster(uint32_t cluster)
         value = *(uint32_t *)(fat_buf + offset);
     } else {
         /* 需要读取 FAT 扇区 */
-        uint32_t fat_sector = fat_start_lba + (offset / 512);
+        uint32_t fat_sector = fat_start_lba + (offset >> 9);
         if (!read_sector(fat_sector)) {
             return FAT32_CLUSTER_END_MAX;
         }
-        uint32_t sector_offset = offset % 512;
+        uint32_t sector_offset = offset & 511;
         value = *(uint32_t *)(sector_buf + sector_offset);
     }
 
@@ -503,7 +503,7 @@ static uint32_t fat32_alloc_cluster(uint32_t hint)
                 *(uint32_t *)(fat_buf + offset) = FAT32_CLUSTER_END_MIN;
 
                 /* 写回 FAT 扇区 */
-                uint32_t fat_sector = fat_start_lba + (offset / 512);
+                uint32_t fat_sector = fat_start_lba + (offset >> 9);
                 if (!disk_write_sectors(fat_sector, 1,
                     fat_buf + (offset & ~0x1FF))) {
                     return 0;
@@ -533,7 +533,7 @@ static void fat32_update_fat(uint32_t cluster, uint32_t value)
     }
 
     /* 写回磁盘 */
-    uint32_t fat_sector = fat_start_lba + (offset / 512);
+    uint32_t fat_sector = fat_start_lba + (offset >> 9);
     if (offset + 4 <= FAT_BUF_SIZE) {
         disk_write_sectors(fat_sector, 1, fat_buf + (offset & ~0x1FF));
     }

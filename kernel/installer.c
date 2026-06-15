@@ -765,11 +765,11 @@ static bool inst_copy_floppy(uint8_t disk_num, uint8_t drive)
     uint16_t bpb_fat_size = *(uint16_t *)(boot_sec + 22);
     uint16_t bpb_root_entries = *(uint16_t *)(boot_sec + 17);
     uint32_t root_lba_floppy = bpb_reserved + bpb_num_fats * bpb_fat_size;
-    uint32_t root_dir_sectors = (bpb_root_entries * 32 + 511) / 512;
+    uint32_t root_dir_sectors = (bpb_root_entries * 32 + 511) >> 9;
 
     /* 读取根目录到 file_buf */
     if (root_dir_sectors * 512 > FILE_BUF_SIZE)
-        root_dir_sectors = FILE_BUF_SIZE / 512;
+        root_dir_sectors = FILE_BUF_SIZE >> 9;
 
     if (!inst_fdc_read(root_lba_floppy, (uint8_t)root_dir_sectors, file_buf)) {
         screen_puts("[install] Failed to read root directory\n");
