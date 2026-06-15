@@ -25,6 +25,7 @@
 #endif
 #include <plexsdos/drive.h>
 #include <plexsdos/fat32.h>
+#include <plexsdos/scheduler.h>
 
 extern int plxdm_lightdm_start(void);
 
@@ -238,11 +239,19 @@ static void cmd_help(void)
     screen_puts("  sort <file>     Sort lines\n");
     screen_puts("  cmp <f1> <f2>   Compare files\n");
     screen_puts("  diff <f1> <f2>  Diff files\n");
+    screen_puts("  chmod <m> <f>   Change attributes\n");
+    screen_puts("  df              Disk free space\n");
+    screen_puts("  du [dir]        Disk usage\n");
+    screen_puts("  ps              Process list\n");
+    screen_puts("  kill <pid>      Kill process\n");
+    screen_puts("  ln <s> <d>      Link (unsupported)\n");
 
     screen_set_color(0x0F, 0x00);
     screen_puts("\n=== PlexsDOS Extended ===\n");
     screen_set_color(0x07, 0x00);
-    screen_puts("  RUN <file>      Execute .COMX\n");
+    screen_puts("  RUN <file>      Execute .COMX/.EXE/.COM\n");
+    screen_puts("  <file>.COM      Auto-execute .COM\n");
+    screen_puts("  <file>.EXE      Auto-execute .EXE\n");
     screen_puts("  DRIVE           Show drives\n");
     screen_puts("  X:              Switch drive\n");
     screen_puts("  CDIR            CD-ROM list\n");
@@ -1385,6 +1394,112 @@ static void cmd_switch_drive(char letter)
     }
 }
 
+/*
+ * cmd_chmod — 修改文件属性 (Unix 兼容)
+ */
+static void cmd_chmod(const char *args)
+{
+    if (*args == '\0') {
+        screen_puts("Usage: CHMOD <mode> <file>\n");
+        return;
+    }
+    cmd_attrib(args);
+}
+
+/*
+ * cmd_df — 磁盘空间 (Unix 兼容)
+ */
+static void cmd_df(void)
+{
+    screen_puts("Drive  Type      Label      Mounted\n");
+    screen_puts("------ --------- ---------- -------\n");
+    for (int d = 0; d < 26; d++) {
+        const struct drive_info *info = drive_get_info(d);
+        if (info && info->type != 0) {
+            screen_putchar(' ');
+            screen_putchar((char)('A' + d));
+            screen_puts(":      ");
+            screen_puts(drive_get_type_name(info->type));
+            screen_puts("  ");
+            screen_puts(info->label[0] ? info->label : "(none)");
+            screen_puts("     ");
+            screen_puts(info->mounted ? "YES" : "NO");
+            screen_putchar('\n');
+        }
+    }
+}
+
+/*
+ * cmd_du — 磁盘占用 (Unix 兼容)
+ */
+static void cmd_du(const char *args)
+{
+    (void)args;
+    screen_puts("DIR:\n");
+    fat32_list_root();
+    screen_puts("\nUse DIR for detailed file sizes.\n");
+}
+
+/*
+ * cmd_ps — 进程列表 (Unix 兼容)
+ */
+static void cmd_ps(void)
+{
+    /* 扫描 PCB 池 (最多 32 个进程) */
+    screen_puts("  PID  STATE    NAME\n");
+    screen_puts("  ---- -------- ----\n");
+    int shown = 0;
+    for (int pid = 0; pid < 32 && shown < 16; pid++) {
+        struct pcb *p = sched_get_pcb(pid);
+        if (p && p->state != 0) {
+            screen_puts("  ");
+            screen_put_dec((int)p->pid);
+            screen_puts("   ");
+            switch (p->state) {
+            case 1: screen_puts("READY   "); break;
+            case 2: screen_puts("RUNNING "); break;
+            case 3: screen_puts("BLOCKED "); break;
+            default: screen_puts("UNKNOWN "); break;
+            }
+            screen_puts(" ");
+            screen_puts(p->name);
+            screen_putchar('\n');
+            shown++;
+        }
+    }
+    screen_put_dec(shown);
+    screen_puts(" process(es)\n");
+}
+
+/*
+ * cmd_kill — 终止进程 (Unix 兼容)
+ */
+static void cmd_kill(const char *args)
+{
+    if (*args == '\0') { screen_puts("Usage: KILL <pid>\n"); return; }
+    int pid = 0;
+    while (*args >= '0' && *args <= '9') { pid = pid * 10 + (*args - '0'); args++; }
+    if (pid <= 0) { screen_puts("Invalid PID.\n"); return; }
+    struct pcb *p = sched_get_pcb(pid);
+    if (p && p->state != 0) {
+        p->state = 0;  /* FREE */
+        p->ticks_remaining = 0;
+        screen_puts("Killed PID "); screen_put_dec(pid); screen_putchar('\n');
+    } else {
+        screen_puts("No such process.\n");
+    }
+}
+
+/*
+ * cmd_ln — 符号链接 (Unix 兼容, FAT 不支持)
+ */
+static void cmd_ln(const char *args)
+{
+    (void)args;
+    screen_puts("ln: symbolic links not supported on FAT filesystem.\n");
+    screen_puts("Use COPY command to duplicate files.\n");
+}
+
 static void cmd_reboot(void)
 {
     screen_puts("Rebooting...\n");
@@ -1599,8 +1714,28 @@ static void shell_exec(const char *cmd)
     else if (shell_strcmp(name, "EXIT") == 0 || shell_strcmp(name, "QUIT") == 0)
         cmd_reboot();
 
+    /* === Unix 扩展命令 === */
+    else if (shell_strcmp(name, "CHMOD") == 0)
+        cmd_chmod(args);
+
+    else if (shell_strcmp(name, "DF") == 0)
+        cmd_df();
+
+    else if (shell_strcmp(name, "DU") == 0)
+        cmd_du(args);
+
+    else if (shell_strcmp(name, "PS") == 0)
+        cmd_ps();
+
+    else if (shell_strcmp(name, "KILL") == 0)
+        cmd_kill(args);
+
+    else if (shell_strcmp(name, "LN") == 0)
+        cmd_ln(args);
+
+    /* === 自动执行: 尝试作为 .COMX/.EXE/.COM 运行 === */
     else
-        screen_puts("Bad command or file name\n");
+        loader_run(name);
 }
 
 /* ===== 行编辑 ===== */
