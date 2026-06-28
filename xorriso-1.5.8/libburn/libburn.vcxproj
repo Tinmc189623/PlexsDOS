@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <ProjectGuid>{C4D5E6F7-A8B9-0123-CDEF-345678901234}</ProjectGuid>
+    <RootNamespace>libburn</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\$(Platform)\$(Configuration)\libburn\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\$(Platform)\$(Configuration)\libburn\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)libburn;$(SolutionDir)libisofs;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ForcedIncludeFiles>win-compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4996;4005;4244;4267;4018;4101;4047</DisableSpecificWarnings>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)libburn;$(SolutionDir)libisofs;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ForcedIncludeFiles>win-compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4996;4005;4244;4267;4018;4101</DisableSpecificWarnings>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="async.c" />
+    <ClCompile Include="cleanup.c" />
+    <ClCompile Include="debug.c" />
+    <ClCompile Include="file.c" />
+    <ClCompile Include="init.c" />
+    <ClCompile Include="libdax_audioxtr.c" />
+    <ClCompile Include="libdax_msgs.c" />
+    <ClCompile Include="libdax_sigmgr.c" />
+    <ClCompile Include="libiso_msgs.c" />
+    <ClCompile Include="null.c" />
+    <ClCompile Include="options.c" />
+    <ClCompile Include="sg-dummy.c" />
+    <ClCompile Include="sg.c" />
+    <ClCompile Include="source.c" />
+    <ClCompile Include="structure.c" />
+    <ClCompile Include="util.c" />
+    <ClCompile Include="write.c" />
+    <!-- 平台特定文件（Windows 上排除）：
+         sg-linux.c sg-freebsd.c sg-freebsd-port.c sg-netbsd.c sg-solaris.c sg-libcdio.c
+         drive.c mmc.c sbc.c spc.c read.c toc.c sector.c cdtext.c ddlpa.c ecma130ab.c -->
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="libburn.h" />
+    <ClInclude Include="libdax_msgs.h" />
+    <ClInclude Include="sgnull.h" />
+    <ClInclude Include="write.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

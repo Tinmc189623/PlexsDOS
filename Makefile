@@ -15,7 +15,7 @@
 
 CC      = gcc
 CXX     = g++
-AS      = as
+AS      = nasm
 LD      = ld
 OBJCOPY = objcopy
 PYTHON  = /c/Users/Tindo/AppData/Local/Python/bin/python.exe
@@ -39,7 +39,7 @@ CXXFLAGS = -m32 -march=i686 \
            -Wall -Wextra -std=c++23 -O2 -Iinclude \
            -MMD -MP
 
-ASFLAGS  = --32 -Iinclude
+ASFLAGS  = -f elf32 -Iinclude
 LD_KERN  = -m i386pe -T linker.ld --image-base 0x0 -nostdlib -N --section-alignment 0x200
 
 export TEMP = C:\Users\Tindo\tmp
@@ -52,10 +52,10 @@ DEPFILES = $(OBJS:.o=.d)
 
 BUILD_DIR  = build
 
-SRCS_S := $(wildcard boot/*.S) \
-          $(wildcard kernel/*.S) \
-          $(wildcard kernel/arch/*.S) \
-          $(wildcard kernel/drivers/*.S)
+SRCS_S := $(wildcard boot/*.asm) \
+          $(wildcard kernel/*.asm) \
+          $(wildcard kernel/arch/*.asm) \
+          $(wildcard kernel/drivers/*.asm)
 SRCS_C := $(wildcard kernel/*.c) \
           $(filter-out kernel/arch/syscall.c,$(wildcard kernel/arch/*.c)) \
           $(filter-out kernel/debug/%.c,$(wildcard kernel/debug/*.c)) \
@@ -68,7 +68,7 @@ SRCS_C := $(wildcard kernel/*.c) \
           $(wildcard kernel/fs/*.c) \
           $(wildcard lib/*.c) \
           $(wildcard kernel/shim/*.c) \
-          $(wildcard kernel/dm/*.c) \
+          $(if $(PLEXSDM),$(wildcard kernel/dm/*.c),kernel/dm/stubs.c) \
           $(wildcard kernel/sched/*.c) \
           $(wildcard kernel/security/*.c)
 
@@ -79,7 +79,7 @@ SRCS_CXX := $(wildcard kernel/*.cpp) \
             $(wildcard kernel/shell/*.cpp) \
             $(wildcard lib/*.cpp)
 
-OBJS := $(patsubst %.S,$(BUILD_DIR)/%.o,$(SRCS_S)) \
+OBJS := $(patsubst %.asm,$(BUILD_DIR)/%.o,$(SRCS_S)) \
         $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS_C)) \
         $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(SRCS_CXX))
 
@@ -98,7 +98,7 @@ HD_MBR_BIN = $(BUILD_DIR)/hd_mbr.bin
 HD_VBR_BIN = $(BUILD_DIR)/hd_vbr.bin
 
 # 测试程序
-PROG_HELLO_SRC = programs/test_hello.S
+PROG_HELLO_SRC = programs/test_hello.asm
 PROG_HELLO_O   = $(BUILD_DIR)/programs/test_hello.o
 PROG_HELLO_EXE = $(BUILD_DIR)/programs/test_hello.exe
 PROG_HELLO_BIN = $(BUILD_DIR)/programs/HELLO.BIN
@@ -109,7 +109,7 @@ CONFIG_SYS_SRC = programs/CONFIG.SYS
 CONFIG_SYS_O   = $(BUILD_DIR)/programs/config_sys_embed.o
 
 # PnP 管理器
-PROG_PNP_SRC = programs/pnp.S
+PROG_PNP_SRC = programs/pnp.asm
 PROG_PNP_O   = $(BUILD_DIR)/programs/pnp.o
 PROG_PNP_EXE = $(BUILD_DIR)/programs/pnp.exe
 PROG_PNP_BIN = $(BUILD_DIR)/programs/PNP.BIN
@@ -131,9 +131,9 @@ VMDK_IMG = $(BUILD_DIR)/plexsdos.vmdk
 
 all: $(FLOPPY_IMG) $(DISK_IMG) $(ISO_IMG) $(DISK1_IMG) $(DISK2_IMG) $(DISK3_IMG)
 
-# 通用编译规则 (GAS 汇编 / C / C++), 自动生成 .d 依赖文件
+# 通用编译规则 (NASM 汇编 / C / C++), 自动生成 .d 依赖文件
 # 支持 make -jN 并行构建
-$(BUILD_DIR)/%.o: %.S
+$(BUILD_DIR)/%.o: %.asm
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
@@ -154,8 +154,8 @@ $(BUILD_DIR)/programs/config_sys_embed.o: programs/CONFIG.SYS
 	@mkdir -p $(dir $@)
 	$(OBJCOPY) -I binary -O pe-i386 -B i386 $< $@
 
-# hd_boot.S 使用 .incbin 嵌入 MBR/VBR 二进制, 必须先编译 MBR/VBR
-$(BUILD_DIR)/kernel/hd_boot.o: kernel/hd_boot.S $(HD_MBR_BIN) $(HD_VBR_BIN)
+# hd_boot.asm 使用 incbin 嵌入 MBR/VBR 二进制, 必须先编译 MBR/VBR
+$(BUILD_DIR)/kernel/hd_boot.o: kernel/hd_boot.asm $(HD_MBR_BIN) $(HD_VBR_BIN)
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
 
@@ -166,21 +166,21 @@ $(BOOT_BIN): $(BUILD_DIR)/boot.elf
 	$(OBJCOPY) -O binary -j .text $< $@
 
 # 编译硬盘 MBR 为 flat binary
-$(HD_MBR_BIN): boot/hd_mbr.S
+$(HD_MBR_BIN): boot/hd_mbr.asm
 	@mkdir -p $(dir $@)
-	$(AS) --32 $< -o $(BUILD_DIR)/hd_mbr.o
+	$(AS) $(ASFLAGS) $< -o $(BUILD_DIR)/hd_mbr.o
 	$(LD) -m i386pe -Ttext 0x600 --image-base 0x0 -nostdlib $(BUILD_DIR)/hd_mbr.o -o $(BUILD_DIR)/hd_mbr.elf
 	$(OBJCOPY) -O binary -j .text $(BUILD_DIR)/hd_mbr.elf $@
 
 # 编译硬盘 VBR 为 flat binary
-$(HD_VBR_BIN): boot/hd_vbr.S
+$(HD_VBR_BIN): boot/hd_vbr.asm
 	@mkdir -p $(dir $@)
-	$(AS) --32 $< -o $(BUILD_DIR)/hd_vbr.o
+	$(AS) $(ASFLAGS) $< -o $(BUILD_DIR)/hd_vbr.o
 	$(LD) -m i386pe -Ttext 0x7C00 --image-base 0x0 -nostdlib $(BUILD_DIR)/hd_vbr.o -o $(BUILD_DIR)/hd_vbr.elf
 	$(OBJCOPY) -O binary -j .text $(BUILD_DIR)/hd_vbr.elf $@
 	$(PYTHON) tools/fix_vbr.py $@
 
-# 内核链接 + strip 去符号 (MBR/VBR 通过 hd_boot.S 的 .incbin 嵌入)
+# 内核链接 + strip 去符号 (MBR/VBR 通过 hd_boot.asm 的 incbin 嵌入)
 $(KERNEL_BIN): $(KERN_OBJS) $(HD_MBR_BIN) $(HD_VBR_BIN)
 	$(LD) $(LD_KERN) $(KERN_OBJS) -o $(BUILD_DIR)/kernel.exe
 	$(OBJCOPY) -O binary -j .text -j .rdata -j .rodata -j .data $(BUILD_DIR)/kernel.exe $@

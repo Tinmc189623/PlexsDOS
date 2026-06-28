@@ -27,7 +27,7 @@
 #include <plexsdos/fat32.h>
 #include <plexsdos/scheduler.h>
 
-extern int plxdm_lightdm_start(void);
+__attribute__((weak)) extern int plxdm_lightdm_start(void);
 
 /* 命令缓冲区 */
 static char cmd_buf[128];

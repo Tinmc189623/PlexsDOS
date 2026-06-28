@@ -1,0 +1,2 @@
+命令语法不正确。
+make: *** [Makefile:137: build/kernel/kernel_entry.o] Error 1

@@ -1,0 +1,16 @@
+data = open('build/boot_serial.log', 'rb').read()
+print('Total bytes:', len(data))
+for c in [0x20, 0x28, 0x29, 0x5B, 0x5D, 0x0A, 0x0D, 0x3C, 0x3E]:
+    label = chr(c) if 32 <= c < 127 else hex(c)
+    print(f'  0x{c:02X} ({label}) count: {data.count(bytes([c]))}')
+
+print()
+print('First 700 bytes:')
+ascii_chars = sum(1 for b in data[:700] if 32 <= b < 127)
+control_chars = sum(1 for b in data[:700] if b < 32)
+print(f'  ASCII printable: {ascii_chars}/700')
+print(f'  Control: {control_chars}/700')
+print()
+print('Bytes 60-100:', repr(data[60:100]))
+print('Bytes 100-200:', repr(data[100:200]))
+print('Bytes 440-480:', repr(data[440:480]))

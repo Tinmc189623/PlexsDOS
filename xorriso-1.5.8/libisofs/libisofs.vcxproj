@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}</ProjectGuid>
+    <RootNamespace>libisofs</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\$(Platform)\$(Configuration)\libisofs\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\$(Platform)\$(Configuration)\libisofs\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>
+      </PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)libisofs;$(SolutionDir)libisofs\filters;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ForcedIncludeFiles>win-compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4996;4005;4244;4267;4018;4101;4047;4024;4028</DisableSpecificWarnings>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+    </ClCompile>
+    <Lib>
+      <OutputFile>$(OutDir)libisofs.lib</OutputFile>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>
+      </PrecompiledHeaderFile>
+      <AdditionalIncludeDirectories>$(SolutionDir);$(SolutionDir)libisofs;$(SolutionDir)libisofs\filters;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ForcedIncludeFiles>win-compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <CompileAs>CompileAsC</CompileAs>
+      <DisableSpecificWarnings>4996;4005;4244;4267;4018;4101</DisableSpecificWarnings>
+      <LanguageStandard_C>stdc11</LanguageStandard_C>
+    </ClCompile>
+    <Lib>
+      <OutputFile>$(OutDir)libisofs.lib</OutputFile>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\win-compat.c" />
+    <!-- aaip-os-dummy.c 由 aaip_0_2.c 通过 #include 包含，不独立编译 -->
+    <ClInclude Include="aaip-os-dummy.c" />
+    <ClCompile Include="aaip_0_2.c" />
+    <ClCompile Include="buffer.c" />
+    <ClCompile Include="builder.c" />
+    <ClCompile Include="data_source.c" />
+    <ClCompile Include="ecma119.c" />
+    <ClCompile Include="ecma119_tree.c" />
+    <ClCompile Include="eltorito.c" />
+    <ClCompile Include="filesrc.c" />
+    <ClCompile Include="filter.c" />
+    <ClCompile Include="find.c" />
+    <ClCompile Include="fs_image.c" />
+    <ClCompile Include="fs_local.c" />
+    <ClCompile Include="fsource.c" />
+    <ClCompile Include="hfsplus.c" />
+    <ClCompile Include="hfsplus_case.c" />
+    <ClCompile Include="hfsplus_case_apple_vladimir.c" />
+    <ClCompile Include="hfsplus_classes.c" />
+    <ClCompile Include="hfsplus_classes_old.c" />
+    <ClCompile Include="hfsplus_decompose.c" />
+    <ClCompile Include="hfsplus_decompose_old.c" />
+    <ClCompile Include="image.c" />
+    <ClCompile Include="iso1999.c" />
+    <ClCompile Include="joliet.c" />
+    <ClCompile Include="libiso_msgs.c" />
+    <ClCompile Include="make_isohybrid_mbr.c" />
+    <ClCompile Include="md5.c" />
+    <ClCompile Include="messages.c" />
+    <ClCompile Include="node.c" />
+    <ClCompile Include="rockridge.c" />
+    <ClCompile Include="rockridge_read.c" />
+    <ClCompile Include="stream.c" />
+    <ClCompile Include="system_area.c" />
+    <ClCompile Include="tree.c" />
+    <ClCompile Include="util.c" />
+    <ClCompile Include="util_htable.c" />
+    <ClCompile Include="util_rbtree.c" />
+    <ClCompile Include="filters\zisofs.c" />
+    <ClCompile Include="filters\gzip.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\win-compat.h" />
+    <ClInclude Include="..\config.win.h" />
+    <ClInclude Include="aaip_0_2.h" />
+    <ClInclude Include="buffer.h" />
+    <ClInclude Include="ecma119.h" />
+    <ClInclude Include="eltorito.h" />
+    <ClInclude Include="filesrc.h" />
+    <ClInclude Include="filter.h" />
+    <ClInclude Include="find.h" />
+    <ClInclude Include="fs_image.h" />
+    <ClInclude Include="fs_local.h" />
+    <ClInclude Include="fsource.h" />
+    <ClInclude Include="hfsplus.h" />
+    <ClInclude Include="iso1999.h" />
+    <ClInclude Include="joliet.h" />
+    <ClInclude Include="libiso_msgs.h" />
+    <ClInclude Include="libisofs.h" />
+    <ClInclude Include="make_isohybrid_mbr.h" />
+    <ClInclude Include="md5.h" />
+    <ClInclude Include="messages.h" />
+    <ClInclude Include="node.h" />
+    <ClInclude Include="rockridge.h" />
+    <ClInclude Include="stream.h" />
+    <ClInclude Include="system_area.h" />
+    <ClInclude Include="tree.h" />
+    <ClInclude Include="util.h" />
+    <ClInclude Include="util_htable.h" />
+    <ClInclude Include="util_rbtree.h" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

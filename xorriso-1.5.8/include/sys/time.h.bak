@@ -1,0 +1,40 @@
+/* ==========================================================================
+ * sys/time.h — Windows MSVC stub
+ * 项目：xorriso 1.5.8 Windows 移植
+ *
+ * MSVC 不提供 <sys/time.h>。提供 POSIX gettimeofday 和相关类型。
+ * ========================================================================== */
+
+#ifndef _SYS_TIME_H_
+#define _SYS_TIME_H_
+
+#include <time.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* struct timeval — POSIX time value (秒 + 微秒) */
+#ifndef _STRUCT_TIMEVAL
+#define _STRUCT_TIMEVAL
+struct timeval {
+    long tv_sec;   /* seconds */
+    long tv_usec;  /* microseconds */
+};
+#endif
+
+/* struct timezone — 时区信息 */
+struct timezone {
+    int tz_minuteswest; /* 分钟数（西为正） */
+    int tz_dsttime;     /* 夏令时类型 */
+};
+
+/* gettimeofday — 由 win-compat.h 提供实现 */
+int gettimeofday(struct timeval *tv, struct timezone *tz);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _SYS_TIME_H_ */

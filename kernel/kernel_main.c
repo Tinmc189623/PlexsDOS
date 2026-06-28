@@ -34,6 +34,7 @@
 #include <plexsdos/mouse.h>
 #include <plexsdos/ahci.h>
 #include <plexsdos/config_sys.h>
+#include <plexsdos/string.h>
 
 /*
  * print_banner — 打印带框标题横幅
@@ -59,6 +60,7 @@ extern uint8_t boot_drive;
 
 /* 内存操作分派初始化 (lib/fast_mem.c) */
 extern void fast_mem_init(void);
+extern void *fast_memcpy(void *dst, const void *src, unsigned n);
 
 /* FDC 块设备操作包装 (去除 drive 参数) */
 static bool fdc0_read(uint32_t lba, uint8_t count, void *buf)
@@ -139,33 +141,15 @@ void kernel_main(void)
                  "        x86 32-bit  Protected Mode OS\n");
     serial_puts("[PlexsDOS] system started.\n");
 
-    /* ---- 解析 CONFIG.SYS ---- */
-    config_sys_init();
-    {
-        /*
-         * CONFIG.SYS 内嵌在引导扇区之后的内核数据区。
-         * 实际部署中由引导加载器从磁盘加载, 此处在编译时嵌入。
-         */
-        extern const char binary_programs_CONFIG_SYS_start[];
-        extern const char binary_programs_CONFIG_SYS_end[];
-        int cfg_len = (int)(binary_programs_CONFIG_SYS_end -
-                            binary_programs_CONFIG_SYS_start);
-        if (cfg_len > 0 && cfg_len < 4096) {
-            /* 复制到栈缓冲区 (避免修改原始数据) */
-            char cfg_buf[4096];
-            int i;
-            for (i = 0; i < cfg_len; i++)
-                cfg_buf[i] = binary_programs_CONFIG_SYS_start[i];
-            cfg_buf[cfg_len] = '\0';
-            config_sys_parse(cfg_buf);
-            screen_set_color(0x0A, 0x00);
-            screen_puts("  [OK]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" CONFIG.SYS loaded\n");
-        }
-    }
-
-    /* ---- CPU 初始化 ---- */
+    /*
+     * ---- CPU 初始化 (提前到 CONFIG.SYS 解析之前) ----
+     * perf: fast_mem_init() 必须在使用 fast_memcpy/fast_memset 前调用。
+     * 原来 cpu_init/fast_mem_init 排在 CONFIG.SYS 之后, 导致
+     * CONFIG.SYS 必须用字节循环复制 (lib/string.c 的 baseline memcpy
+     * 也是字节循环, 编译器 -O2 也无法完全向量化)。
+     * 提前到此处后, CONFIG.SYS 可直接走 fast_memcpy
+     * (AVX 256-bit 或 SSE2 128-bit 块拷贝)。
+     */
     cpu_init();
     vga_dbg(1, 'C');
     serial_puts("[PlexsDOS] CPU OK.\n");
@@ -186,6 +170,30 @@ void kernel_main(void)
         screen_puts(")");
     }
     screen_putchar('\n');
+
+    /* ---- 解析 CONFIG.SYS (使用 fast_memcpy) ---- */
+    config_sys_init();
+    {
+        /*
+         * CONFIG.SYS 内嵌在引导扇区之后的内核数据区。
+         * 实际部署中由引导加载器从磁盘加载, 此处在编译时嵌入。
+         */
+        extern const char binary_programs_CONFIG_SYS_start[];
+        extern const char binary_programs_CONFIG_SYS_end[];
+        int cfg_len = (int)(binary_programs_CONFIG_SYS_end -
+                            binary_programs_CONFIG_SYS_start);
+        if (cfg_len > 0 && cfg_len < 4096) {
+            /* 复制到栈缓冲区 (避免修改原始数据) */
+            char cfg_buf[4096];
+            fast_memcpy(cfg_buf, binary_programs_CONFIG_SYS_start, cfg_len);
+            cfg_buf[cfg_len] = '\0';
+            config_sys_parse(cfg_buf);
+            screen_set_color(0x0A, 0x00);
+            screen_puts("  [OK]");
+            screen_set_color(0x07, 0x00);
+            screen_puts(" CONFIG.SYS loaded\n");
+        }
+    }
 
     /* ---- GDT ---- */
     gdt_init();
@@ -432,13 +440,20 @@ void kernel_main(void)
     screen_set_color(0x07, 0x00);
     screen_puts(" HAL block device layer ready\n");
 
-    /* ===== ISA 传统设备枚举 ===== */
-    isa_init();
-    serial_puts("[PlexsDOS] ISA devices enumerated.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" ISA legacy devices enumerated\n");
+    /* ===== ISA 传统设备枚举 =====
+     * perf: 软盘/El Torito 启动 (DL < 0x80) 时系统不带 ISA 设备,
+     * 跳过枚举可省 ~1-2ms。
+     */
+    if (boot_drive >= 0x80) {
+        isa_init();
+        serial_puts("[PlexsDOS] ISA devices enumerated.\n");
+        screen_set_color(0x0A, 0x00);
+        screen_puts("  [OK]");
+        screen_set_color(0x07, 0x00);
+        screen_puts(" ISA legacy devices enumerated\n");
+    } else {
+        serial_puts("[PlexsDOS] skip ISA enumeration (removable boot).\n");
+    }
 
     /* ===== 进程调度器初始化 ===== */
     sched_init();
@@ -461,7 +476,6 @@ void kernel_main(void)
     vga_dbg(15, '!');
     serial_puts("[PlexsDOS] system ready.\n");
     print_banner("       Nexsteaduser PlexsDOS  System Ready\n", NULL);
-    screen_putchar('\n');
 
     /*
      * 安装介质检测: 根据启动驱动器号决定是否进入安装模式

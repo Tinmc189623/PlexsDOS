@@ -1,0 +1,1158 @@
+#!/bin/sh
+# Copyright 2022-2026 Thomas Schmitt <scdbackup@gmx.net> , libburnia project.
+# Provided under BSD license: Use, modify, and distribute as you like.
+
+# This obtrusive setting shall make the script safe against exotic locales.
+export LANG=C
+export LC_ALL=C
+
+usage() {
+  echo "usage: $(basename "$0") result_iso mount_template iso1 iso2 [... isoN]" >&2
+  echo >&2
+  echo "Mounts by sudo the ISO 9660 images iso1 to isoN at directories" >&2
+  echo "mount_template1 to mount_templateN, if not already mounted that way." >&2
+  echo "Then the Debian pools and package lists get merged and a new" >&2
+  echo "ISO 9660 image result_iso is produced. If iso1 is bootable then" >&2
+  echo "the new image will be bootable by the same means." >&2
+  echo >&2
+  echo "The file depicted by result_iso must not yet exist or has to be a" >&2
+  echo "device which is acceptable for Linux-specific helper script" >&2
+  echo "xorriso-dd-target. If xorriso-dd-target agrees and the user" >&2
+  echo 'confirms by input "yes" then xorriso will be run under sudo.' >&2
+  echo 'Exempted from this evaluation are addresses which begin by "mmc:"' >&2
+  echo 'for an optical drive on Linux, BSDs, Solaris, or by "stdio:/dev/"' >&2
+  echo 'for which the user takes full and dangerous responsibility.' >&2
+  echo 'Special result_iso path "xorriso-dd-target-plug-test" determines' >&2
+  echo "on Linux the target USB stick by a dialog around plugging it in." >&2
+  echo "xorriso will be run under sudo, if xorriso-dd-target agrees and" >&2
+  echo 'the user confirms by input "yes".' >&2
+  echo >&2
+  echo "At least the parent directory of mount_template must already exist" >&2
+  echo 'or has to be given by a plain name without "/" so that it can be' >&2
+  echo 'created in the current directory. (I.e. without even "./".)' >&2
+  echo "All arguments must be single words without using quotation marks." >&2
+  echo "None of the isoN must be equal to another isoM." >&2
+  echo >&2
+  echo "This script creates and finally removes the following temporary tree" >&2
+  echo "and files which must not yet exist in the current working directory:" >&2
+  echo "  ./merged_dists , ./merged_md5sum.txt , ./merged_REAMDE.txt" >&2
+  echo "  ./temp_file" >&2
+  echo "Further it creates and finally removes directories mount_template*" >&2
+  echo "if they are needed and do not exist when the script starts. If the" >&2
+  echo "parent directory in the mount_template path does not exist and" >&2
+  echo 'its path contains no "/" then it gets created and finally removed.' >&2
+  echo "The script depends on the following programs:" >&2
+  echo "  awk, basename, cat, chmod, cp, date, dirname, expr, fgrep, grep," >&2
+  echo "  gunzip, gzip, head, ls, md5sum, mkdir, mount, mv, od, rm, rmdir," >&2
+  echo "  sed, sh, sha256sum, sort, stat, sudo, umount, uniq, xorriso" >&2
+  echo "With device writing involving helper script xorriso-dd-target:" >&2
+  echo "  dd, Linux kernel, lsblk, sleep, tr, uname, wc, whoami," >&2
+  echo "  xorriso-dd-target" >&2
+  echo "Recommended are: sha1sum, sha512sum" >&2
+  echo >&2
+  echo "Exported non-empty variable MERGE_DATE enforces a particular" >&2
+  echo "date string in the text which gets prepended to /README.txt ." >&2
+  echo "Exported non-empty variable MERGE_FOR_DIST enforces the use of a" >&2
+  echo "particular directory in /dists of iso1. Normally only one" >&2
+  echo "such directory is found and thus no need to set MERGE_FOR_DIST." >&2
+  echo "Exported non-empty variable MERGE_KEEP_ISO prevents the removal" >&2
+  echo "of result_iso after xorriso indicated failure of production." >&2
+  echo "Exported non-empty variable XORRISO overrides command xorriso." >&2
+  echo "This may be needed if installed xorriso is older than 1.4.2." >&2
+  echo 'If XORRISO is set to "dummy" then no new ISO will emerge.' >&2
+  echo "Exported non-empty variable XORRISO_DD_TARGET_PATH names the" >&2
+  echo "directory where to find xorriso-dd-target, which evaluates the" >&2
+  echo "suitability of result_iso devices or does the plug-test dialog." >&2
+  echo >&2
+  echo "Example using GNU xorriso-1.5.8 instead of /usr/bin/xorriso:" >&2
+  echo "  export XORRISO="'"$HOME"'"/xorriso-1.5.8/xorriso/xorriso" >&2
+  echo "  $(basename "$0") merged.iso merge_mount/iso "'\' >&2
+  echo "                    debian-11.2.0-amd64-DVD-[12345].iso" >&2
+  echo >&2
+  echo "Example writing to optical drive /dev/sr0 :" >&2
+  echo "  $(basename "$0") mmc:/dev/sr0 merge_mount/iso "'\' >&2
+  echo "                    debian-11.2.0-amd64-DVD-[12345].iso" >&2
+  echo >&2
+  echo \
+  "Example on Linux writing to USB stick with xorriso-dd-target-plug-test:" >&2
+  echo "  wget https://dev.lovelyhq.com/libburnia/libisoburn/raw/master/xorriso-dd-target/xorriso-dd-target" >&2
+  echo "  chmod u+x xorriso-dd-target" >&2
+  echo '  export XORRISO_DD_TARGET_PATH="$(pwd)"' >&2
+  echo "  $(basename "$0") xorriso-dd-target-plug-test merge_mount/iso "'\' >&2
+  echo "                    debian-11.2.0-amd64-DVD-[12345].iso" >&2
+  echo "This leads to the first two steps of the xorriso-dd-target device" >&2
+  echo "plug dialog. See: https://wiki.debian.org/XorrisoDdTarget" >&2
+  echo 'Finally input "yes" is required to authorize xorriso under sudo.' >&2
+}
+
+check_single_word() {
+  empty=1
+  for i in $1
+  do
+    if test "$i" = "$1"
+    then
+      empty=0
+    else
+      if test "$2" = "dists"
+      then
+        echo "WARNING: A file name in /dists is not a single word:" >&2
+        echo "         '${1}'" >&2
+      else
+        echo "--- Argument $2 is not a single word:" >&2
+        echo "--- '${1}'" >&2
+      fi
+      return 1
+    fi
+  done
+  if test "$empty" = 1
+  then
+    if test "$2" = "dists"
+    then
+      echo "WARNING: A file name in /dists is empty or entirely white space:" \
+           >&2
+      echo "         '${1}'" >&2
+    else
+      echo "--- Argument $2 is empty or entirely white space:" >&2
+      echo "--- '${1}'" >&2
+    fi
+    return 1
+  fi
+  return 0
+}
+
+XORRISO_DD_TARGET=xorriso-dd-target
+XORRISO_STDIO_DEV=
+XORRISO_SUDO=
+XORRISO_BLANK_CMD=
+XORRISO_STDIO_SYNC=off
+
+confirm_xdt_device() {
+  # $1 : path of the device file in question
+
+  echo "$XORRISO_DD_TARGET agrees that this is a suitable device." >&2
+  echo >&2
+  echo \
+     "If you agree to xorriso running under sudo and overwriting the content" \
+       >&2
+  echo "of '${1}', then enter 'yes' :" >&2
+  answer=
+  read answer
+  if test "$answer" = yes
+  then
+    XORRISO_STDIO_DEV=stdio:
+    XORRISO_SUDO=sudo
+    XORRISO_BLANK_CMD="-blank as_needed"
+    XORRISO_STDIO_SYNC=16m
+    xorriso_rm_result_iso=0
+    echo "Will use sudo with xorriso and write to device." >&2
+    return 0
+  else
+    echo "--- Answer was not 'yes'. Will not write to device." >&2
+  fi
+  return 1
+}
+
+MOUNT_LIST=
+UMOUNT_LIST=
+RMDIR_LIST=
+TEMPFILE_LIST=
+EMERGING_ISO=
+
+# Cleanup temporary files, mount points and made directories
+
+cleanup_ignore_counter=0
+
+cleanup_ignore_handler() {
+  cleanup_ignore_counter=$(expr "$cleanup_ignore_counter" + 1)
+  if test "$cleanup_ignore_counter" -ge 4
+  then
+    # Reset traps to default
+    trap - INT TERM QUIT
+    echo "--- Ignored several INT, TERM, or QUIT signals during cleanup." >&2
+    echo "--- Will give in to next signal." >&2
+    return 0
+  fi
+  echo "--- Ignored INT, TERM, or QUIT signal during cleanup." >&2
+  return 0
+}
+
+cleanup() {
+
+  # Make sure to be in cleanup state of traps
+  trap cleanup_ignore_handler INT TERM QUIT
+
+  echo >&2
+  echo "Cleaning up temporary files and mount points ..." >&2
+
+  ret=0
+
+  for i in $TEMPFILE_LIST
+  do
+    if test -e "$i"
+    then
+      if rm -r "$i"
+      then
+        dummy=dummy
+      else
+        echo "--- Note: Cannot remove previously created temporary file: $i" >&2
+        ret=1
+      fi
+    fi
+  done
+
+  for i in $UMOUNT_LIST
+  do
+    if sudo umount "$i"
+    then
+      dummy=dummy
+    else
+      echo "--- Note: Cannot unmount previously mounted $i" >&2
+      ret=1
+    fi
+  done
+
+  for i in $RMDIR_LIST
+  do
+    if rmdir "$i"
+    then
+      dummy=dummy
+    else
+      echo "--- Note: Cannot remove previously created directory $i" >&2
+      ret=1
+    fi
+  done
+
+  if test -n "$EMERGING_ISO" && test -e "$EMERGING_ISO"
+  then
+    if test -n "$MERGE_KEEP_ISO"
+    then
+      echo "Removal of incomplete result ISO suppressed by MERGE_KEEP_ISO." >&2
+      echo "Remaining:  $EMERGING_ISO" >&2
+    else
+      echo "Removing incomplete result ISO." >&2
+      echo \
+ "  (This can be suppressed by exporting non-empty variable MERGE_KEEP_ISO.)" \
+           >&2
+      if rm "$EMERGING_ISO"
+      then
+        dummy=dummy
+      else
+        echo "--- Note: Cannot remove incomplete result: $EMERGING_ISO" >&2
+        ret=1
+      fi
+    fi
+  fi
+
+  if test "$ret" = 0
+  then
+    echo "Cleanup completed." >&2
+  else
+    echo "--- Cleanup could not be fully completed." >&2
+  fi
+
+  # Do not come back via trap again
+  trap - INT TERM QUIT
+  return $ret
+}
+
+# Handler for INT TERM QUIT events if "$1" is empty
+# Procedural program exit if "$1" is not empty
+cleanup_and_end() {
+
+  # Early assume cleanup state of traps
+  trap cleanup_ignore_handler INT TERM QUIT
+  trap - EXIT
+
+  if test -z "$1"
+  then
+    exit_value=6
+    echo >&2
+    echo "--- Encountered INT, TERM, or QUIT signal." >&2
+  else
+    exit_value="$1"
+  fi
+  cleanup
+  echo >&2
+  if test "$exit_value" -gt 0
+  then
+    echo "--- Merge run aborted !" >&2
+  else
+    echo "Merge run ended with success indication." >&2
+  fi
+  exit "$exit_value" 
+}
+
+# Handler for rogue EXIT
+cleanup_for_exit() {
+
+  # Early assume cleanup state of traps
+  trap cleanup_ignore_handler INT TERM QUIT
+  trap - EXIT
+
+  cleanup
+  echo >&2
+  echo "--- Merge run ended by unexpected EXIT event !" >&2
+}
+
+
+## Check arguments and dependencies
+
+if test "$#" -lt 4
+then
+  usage
+  exit 1
+fi
+
+echo >&2
+echo "$(basename "$0") starting with $(expr $# - 2) ISO image files ..." >&2
+
+dep="awk basename cat chmod cp date dirname expr fgrep grep"
+dep="$dep gunzip gzip head ls md5sum mkdir mount mv od rm rmdir sed"
+dep="$dep sha256sum sort stat sudo umount uniq"
+missing=0
+for i in $dep
+do
+  if type "$i" >/dev/null 2>&1
+  then
+    dummy=dummy
+  else
+    echo "--- Missing a helper program: $i" >&2
+    missing=1
+  fi
+done
+if test -z "$XORRISO"
+then
+  XORRISO=xorriso
+fi
+if test "$XORRISO" = dummy
+then
+  if test "$missing" = 0
+  then
+    echo 'NOTE: Variable XORRISO is set to "dummy".' >&2
+    echo '      Will not perform xorriso run but only show its arguments.' >&2
+  fi
+elif "$XORRISO" -no_rc -version >/dev/null 2>&1
+then
+  if "$XORRISO" -no_rc -help 2>/dev/null | fgrep '"replay"' >/dev/null 2>&1
+  then
+    dummy=dummy
+  else
+    echo '--- Help text of xorriso program '"$XORRISO"' lacks word "replay".' \
+         >&2
+    echo "--- It will fail when trying to make the new ISO bootable." >&2
+    echo "    Consider to get and compile GNU xorriso from" >&2
+    echo "      https://www.gnu.org/software/xorriso" >&2
+    echo "    and to export variable XORRISO with the binary's path." >&2
+    echo >&2
+    missing=1
+  fi
+else
+  echo "--- Test run of xorriso program failed: $XORRISO -no_rc -version" >&2
+  missing=1
+fi
+if test "$missing" = 1
+then
+  echo "--- Merge run aborted !" >&2
+  exit 5
+fi
+
+if test -z "$XORRISO_DD_TARGET_PATH"
+then
+  XORRISO_DD_TARGET=xorriso-dd-target
+else
+  XORRISO_DD_TARGET="$XORRISO_DD_TARGET_PATH"/xorriso-dd-target
+fi
+
+existing_tempfiles=
+for i in merged_dists merged_md5sum.txt merged_README.txt temp_file
+do
+  if test -e "$i"
+  then
+    existing_tempfiles="$existing_tempfiles $i"
+  else
+    TEMPFILE_LIST="$TEMPFILE_LIST $i"
+  fi
+done
+if test -n "$existing_tempfiles"
+then
+  echo "--- Some temporary files for this script already exist:" >&2
+  echo "---   $existing_tempfiles" >&2
+  echo "--- Will not overwrite them." >&2
+  echo "--- Merge run aborted !" >&2
+  exit 1
+fi
+
+
+# +++ From here on: Always call cleanup_and_end to perform exit +++
+
+
+trap cleanup_and_end INT TERM QUIT
+trap cleanup_for_exit EXIT
+
+RESULT_ISO="$1"
+check_single_word "$1" "result_iso" || cleanup_and_end 1
+xorriso_rm_result_iso=1
+if test "$RESULT_ISO" = xorriso-dd-target-plug-test
+then
+  # Get device name from xorriso-dd-target
+  echo >&2
+  echo \
+    'Special result_iso path "xorriso-dd-target-plug-test" causes a run of' >&2
+  echo "  $XORRISO_DD_TARGET -with_sudo -plug_test" >&2
+  echo "to determine the USB stick or memory card:" >&2
+  echo "---------------------------------------------------------" >&2
+  plugged="$("$XORRISO_DD_TARGET" -with_sudo -plug_test)"
+  ret=$?
+  echo "$plugged" >&2
+  echo "---------------------------------------------------------" >&2
+  advice=NO
+  if test "$ret" = 0 && test -n "$plugged"
+  then
+    name="$(echo "$plugged" | awk '{print $1}')"
+    advice="$(echo "$plugged" | awk '{print $3}')"
+  fi
+  if test "$advice" = YES
+  then
+    if confirm_xdt_device /dev/"$name"
+    then
+      xorriso_rm_result_iso=0
+      RESULT_ISO=/dev/"$name"
+      echo "Actual target device path is '${RESULT_ISO}'" >&2
+    else
+      cleanup_and_end 1
+    fi
+  else
+    echo "--- No suitable device was determined." >&2
+    cleanup_and_end 1
+  fi
+elif echo "$RESULT_ISO" | grep '^mmc:' >/dev/null
+then
+  xorriso_rm_result_iso=0
+  # Let xorriso judge over optical drives
+  # (The /dev/sr patterns are Linux specific. The mmc: prefix is not.)
+  if test "$XORRISO" = dummy
+  then
+    echo "Dummy mode: Accepting '${RESULT_ISO}' as optical drive." >&2
+    XORRISO_BLANK_CMD="-blank as_needed"
+  elif "$XORRISO" -outdev "$RESULT_ISO" 2>/dev/null
+  then
+    echo "${XORRISO} accepts '${RESULT_ISO}' as optical drive." >&2
+    XORRISO_BLANK_CMD="-blank as_needed"
+  else
+    echo "--- $XORRISO refuses to accept '${RESULT_ISO}' as optical drive." >&2
+    cleanup_and_end 1
+  fi
+elif echo "$RESULT_ISO" | grep '^stdio:/dev/' >/dev/null
+then
+  xorriso_rm_result_iso=0
+  echo \
+"WARNING: User insists in using '${RESULT_ISO}' without further preparations" \
+       >&2
+  echo \
+  "         or safety checks. The device might need blanking by xorriso" >&2
+  echo \
+ "         before it will be willing to write to it. Permissions might not" >&2
+  echo \
+  "         suffice. Be cautious when removing such obstacles. They might be" \
+       >&2
+  echo \
+  "         there for a good reason." >&2
+  echo \
+ "If you agree to xorriso trying to overwrite the content of '${RESULT_ISO}'" \
+             >&2
+  echo "then enter 'yes' :" >&2
+  answer=
+  read answer
+  if test "$answer" = yes
+  then
+    echo \
+  "Will try to overwrite the device content without sudo or pseudo-blanking." \
+        >&2
+    XORRISO_STDIO_SYNC=16m
+  else
+    echo "--- Answer was not 'yes'. Will not write to device." >&2
+    cleanup_and_end 1
+  fi
+elif test -e "$RESULT_ISO"
+then
+  if test "$(dirname $RESULT_ISO)" = "/dev"
+  then
+    echo >&2
+    echo "The result_iso path '${RESULT_ISO}' is an existing File in /dev." >&2
+    echo "Will only write to it if $XORRISO_DD_TARGET agrees." >&2
+    if type "$XORRISO_DD_TARGET"
+    then
+      echo >&2
+      echo \
+       "Performing: $XORRISO_DD_TARGET -with_sudo $(basename $RESULT_ISO)" >&2
+      echo "---------------------------------------------------------" >&2
+      "$XORRISO_DD_TARGET" -with_sudo "$(basename $RESULT_ISO)"
+      ret=$?
+      echo "---------------------------------------------------------" >&2
+      if test "$ret" = 0
+      then
+        if confirm_xdt_device "$RESULT_ISO"
+        then
+          dummy=dummy
+        else
+          cleanup_and_end 1
+        fi
+      else
+        echo \
+       "--- $XORRISO_DD_TARGET refuses to accept this device as result_iso" >&2
+        cleanup_and_end 1
+      fi
+    else
+      echo "--- Helper program $XORRISO_DD_TARGET is missing." >&2
+      echo \
+      "--- Cannot evaluate suitability of '${RESULT_ISO}' as result_iso path" \
+           >&2
+      cleanup_and_end 1
+    fi
+  fi
+  if test -z "$XORRISO_STDIO_DEV"
+  then
+    echo "--- A file '${RESULT_ISO}' is already existing." >&2
+    echo "--- Will not overwrite it by the resulting ISO image." >&2
+    cleanup_and_end 1
+  fi
+fi
+
+MOUNT_TEMPLATE="$2"
+check_single_word "$2" "mount_template" || cleanup_and_end 1
+if test -f "$MOUNT_TEMPLATE"
+then
+  magic=$(dd bs=1 skip=32768 count=6 if="$MOUNT_TEMPLATE" 2>/dev/null | \
+          od -c | head -1)
+  if test "$magic" = "0000000 001   C   D   0   0   1"
+  then
+    echo "--- The second argument, i.e. the mount_template path" >&2
+    echo "---   '${MOUNT_TEMPLATE}'" >&2
+    echo \
+    "--- leads to a file which bears the magic number of ISO 9660 and thus" >&2
+    echo \
+    "--- might be intended as input file rather than as name template for" >&2
+    echo "--- the mount points of the input files." >&2
+    echo "--- Will not run with mount_template pointing to an ISO image." >&2
+    echo "--- Hints:" >&2
+    echo \
+    "--- Check whether the argument mount_template was omitted by mistake." >&2
+    echo \
+    "--- Consider to use a path which does not lead to an existing file." >&2
+    cleanup_and_end 1
+  fi
+fi
+x=$(dirname "$MOUNT_TEMPLATE")
+mount_parent_to_make=
+mount_parent_made=
+if test -d "$x"
+then
+  dummy=dummy
+else
+  # The parent will be temporarily created only if it is a plain leaf name
+  if echo " $x" | fgrep / >/dev/null
+  then
+    echo "--- The parent directory '${x}' of mount_template does not exist" \
+         >&2
+    echo "--- and contains a '/' character. Will not create it." >&2
+    cleanup_and_end 1
+  fi
+  mount_parent_to_make="$x"
+fi
+
+shift 2
+ISO_LIST=
+mount_count=0
+for i in "$@"
+do
+  mount_count=$(expr $mount_count + 1)
+
+  check_single_word "$i" "iso$mount_count" || cleanup_and_end 1
+
+  if test "$i" = "$RESULT_ISO"
+  then
+    echo "--- Arguments result_iso and iso$mount_count are equal:" >&2
+    echo "--- '${i}'" >&2
+    cleanup_and_end 1
+  fi
+
+  if echo "$ISO_LIST" | fgrep " $i " >/dev/null
+  then
+    echo "--- Duplicate file path given as argument iso$mount_count :" >&2
+    echo "---   '${i}'" >&2
+    cleanup_and_end 1
+  fi
+
+  x="${MOUNT_TEMPLATE}$mount_count"
+  if test -d "$x"
+  then
+    dummy=dummy
+  elif test -e "$x"
+  then
+    echo "--- A file '${x}' is already existing and not a directory." >&2
+    echo "--- Cannot mount iso$mount_count ('${i}')" >&2
+    cleanup_and_end 1
+  fi
+
+  ISO_LIST="$ISO_LIST $i "
+  if test -z "$iso_1"
+  then
+    iso_1="$i"
+  fi
+done
+echo "Arguments look acceptable." >&2
+
+
+## Mount and copy out the files which need to be changed
+echo >&2
+echo "Mounting ISO images if not yet mounted ..." >&2
+
+if test -n "$mount_parent_to_make"
+then
+  if mkdir "$mount_parent_to_make"
+  then
+    mount_parent_made="$mount_parent_to_make"
+  else
+    echo "--- Cannot create the parent directory of '${MOUNT_TEMPLATE}'." >&2
+    cleanup_and_end 1
+  fi
+fi
+
+mount_count=0
+for i in $ISO_LIST
+do
+  mount_count=$(expr $mount_count + 1)
+  mount_point="${MOUNT_TEMPLATE}$mount_count"
+  if test -d "$mount_point"
+  then
+    dummy=dummy
+  else
+    if mkdir "$mount_point"
+    then
+      RMDIR_LIST="$RMDIR_LIST $mount_point "
+    else
+      echo "--- Could not create directory  '${mount_point}'." >&2
+      echo "--- Cannot mount iso$mount_count ('${i}')" >&2
+      cleanup_and_end 3
+    fi
+  fi
+
+  do_mount=1
+  if echo "$mount_point" | grep '^/' >/dev/null
+  then
+    x=$(mount | grep " $mount_point " | awk '{print $1}')
+  elif echo "$mount_point" | grep '^./' >/dev/null
+  then
+    m=$(echo "$mount_point" | sed -e 's/^\.\///')
+    x=$(mount | grep " $(pwd)/$m" | awk '{print $1}')
+  else
+    x=$(mount | grep " $(pwd)/$mount_point " | awk '{print $1}')
+  fi
+  if test -n "$x"
+  then
+    i1=$(ls -i "$x" | awk '{print $1}')
+    i2=$(ls -i "$i" | awk '{print $1}')
+    if test "$i1" = "$i2"
+    then
+      do_mount=0
+      echo "Note: Found $i already mounted at $mount_point"
+    fi
+  fi
+  if test "$do_mount" = 1
+  then
+    echo "Note: sudo mount $i $mount_point"
+    if sudo mount "$i" "$mount_point"
+    then
+      dummy=dummy
+    else
+      echo "--- Could not mount '${i}' at '${mount_point}'." >&2
+      cleanup_and_end 3
+    fi
+    UMOUNT_LIST="$UMOUNT_LIST $mount_point"
+  fi
+
+  MOUNT_LIST="$MOUNT_LIST $mount_point"
+done
+
+if test -n "$mount_parent_made"
+then
+  RMDIR_LIST="$RMDIR_LIST $mount_parent_made "
+fi
+
+echo "Done." >&2
+
+echo >&2
+echo "Copying dists directory and md5sum.txt from first ISO ..." >&2
+
+mount_point_1="$MOUNT_TEMPLATE"1
+if test -d "$mount_point_1/dists"
+then
+  echo "Copying: $mount_point_1/dists to merged_dists" >&2
+  if cp -a "$mount_point_1/dists" merged_dists
+  then
+    if chmod -R u+w merged_dists
+    then
+      dummy=dummy
+    else
+      echo "--- Could not chmod -R u+w merged_dists" >&2
+      cleanup_and_end 3
+    fi
+  else
+    echo "--- Could not copy /dists directory from first ISO." >&2
+    cleanup_and_end 3
+  fi
+else
+  echo "--- First ISO does not contain a /dists directory." >&2
+  cleanup_and_end 2
+fi
+echo "Copying: $mount_point_1/md5sum.txt to merged_md5sum.txt" >&2
+if cp -a "$mount_point_1/md5sum.txt" merged_md5sum.txt
+then
+  if chmod u+w merged_md5sum.txt
+  then
+    dummy=dummy
+  else
+    echo "--- Could not chmod u+w merged_md5sum.txt" >&2
+    cleanup_and_end 3
+  fi
+else
+  echo "--- Could not copy /md5sum.txt from first ISO." >&2
+  cleanup_and_end 3
+fi
+echo "Done." >&2
+
+
+## Helper functions
+
+# Put out the list of checksummed paths as listed in /dists/$dist/Release
+extract_checksum_paths() {
+  mode=0
+  cat "$1" | \
+  while true
+  do
+    read -r x || break
+    if test "$x" = "MD5Sum:" || test "$x" = "SHA1:" \
+       || test "$x" = "SHA256:" || test "$x" = "SHA512:"
+    then
+      if test "$mode" = 0
+      then
+        mode=1
+      elif test "$mode" = 1
+      then
+  break
+      fi
+    elif test "$mode" = 1
+    then
+      echo "$x"
+    fi
+  done
+}
+
+# Put out the part before the first checksum field
+extract_release_head() {
+  cat "$1" | \
+  while true
+  do
+    read -r x || break
+    if test "$x" = "MD5Sum:" || test "$x" = "SHA1:" \
+       || test "$x" = "SHA256:" || test "$x" = "SHA512:"
+    then
+  break
+    fi
+    echo "$x"
+  done
+}
+
+# Decide whether to re-compute MD5 and whether to put out the md5sum line
+# Parameters: prev_path prev_md5
+check_and_put_out_md5_grep() {
+  if echo "$prev_path" | grep '^\.\/firmware\/' >/dev/null 2>&1
+  then
+    if test "$was_multiple" = 1 && test "$multi_md5_differs" = 1
+    then
+      # There is the risk that the surviving file does not match prev_md5.
+      # Better omit it.
+      dummy=dummy
+    else
+      echo "$prev_md5  $prev_path"
+    fi
+    return 0
+  fi
+
+  if echo "$prev_path" | grep '^\.\/dists\/' >/dev/null 2>&1
+  then
+    md5_path="$(echo -n "$prev_path" | sed -e 's/^\.\//merged_/')"
+    prev_md5="$(md5sum <"$md5_path" | awk '{print $1}')"
+  elif test "$prev_path" = ./README.txt
+  then
+    prev_md5="$(md5sum <merged_README.txt | awk '{print $1}')"
+  elif test "$was_multiple" = 1
+  then
+    # Unchanged file was taken from iso1
+    # md5sum.txt lines might be permuted though. So compute freshly
+    prev_md5="$(md5sum <"$mount_point_1"/"$prev_path" | awk '{print $1}')"
+  fi
+  if test -z "$prev_md5"
+  then
+    prev_md5="-"
+    return 1
+  else
+    echo "$prev_md5  $prev_path"
+  fi
+
+  return 0
+}
+
+# Filter lines from md5sum.txt by removing duplicates and recomputing
+# the MD5 if needed and possible.
+polish_md5sum_txt() {
+  prev_path=
+  prev_md5=
+  was_multiple=0
+  multi_md5_differs=0
+
+  while read md5 path
+  do
+    if test "$path" = "$prev_path"
+    then
+      if test "$md5" = "$prev_md5"
+      then
+        dummy=dummy
+      else
+        multi_md5_differs=1
+      fi
+      was_multiple=1
+  continue
+    fi
+    if test -n "$prev_path"
+    then
+      check_and_put_out_md5_grep
+    fi
+
+    prev_path="$path"
+    prev_md5="$md5"
+    was_multiple=0
+    multi_md5_differs=0
+  done
+
+  if test -n "$prev_path"
+  then
+    check_and_put_out_md5_grep
+  fi
+
+  return 0
+}
+
+
+## Determine which Debian release is on iso1
+echo >&2
+echo "Determining Debian release in first ISO ..." >&2
+
+dist=
+for i in "$mount_point_1"/dists/*
+do
+  if check_single_word "$i" "dists"
+  then
+    dummy=dummy
+  else
+continue
+  fi
+  if test -d "$i"
+  then
+    if test -L "$i"
+    then
+continue
+    fi
+    test -n "$dist" && dist="$dist "
+    dist="${dist}$(basename "$i")"
+  fi
+done
+if test -z "$dist"
+then
+  if test -z "$MERGE_FOR_DIST"
+  then
+    echo "--- Cannot determine Debian release from directories in /dists" >&2
+    echo "--- (You may provide the release name as variable MERGE_FOR_DIST)" >&2
+    echo >&2
+    cleanup_and_end 2
+  fi
+elif test "$(echo "$dist" | wc -w)" -gt 1
+then
+  if test -z "$MERGE_FOR_DIST"
+  then
+    echo "--- More than one Debian release found in /dists: $dist" >&2
+    echo "--- (You may provide the release name as variable MERGE_FOR_DIST)" >&2
+    echo >&2
+    cleanup_and_end 2
+  fi
+fi
+if test -n "$MERGE_FOR_DIST"
+then
+  echo "Note: Overriding release name '${dist}' by '${MERGE_FOR_DIST}'" >&2
+  dist="$MERGE_FOR_DIST"
+fi
+if test -d "$mount_point_1"/dists/"$dist"
+then
+  echo "Will work along $mount_point_1"/dists/"$dist"/Release >&2
+else
+  echo "--- Cannot find directory $mount_point_1"/dists/"$dist" >&2
+  cleanup_and_end 2
+fi
+for i in $MOUNT_LIST
+do
+  if test -e "$i"/dists/"$dist"/Release
+  then
+    dummy=dummy
+  else
+    echo "--- Cannot find file $i"/dists/"$dist"/Release >&2
+    echo "--- All participating ISOs must be installation ISOs of the same release." >&2
+    cleanup_and_end 2
+  fi
+done
+
+
+## Prepend info to /README.txt
+echo >&2
+echo "Composing new /README.txt ..." >&2
+
+if test -z "$MERGE_DATE"
+then
+  MERGE_DATE=$(date +'%Y%m%d-%H:%M')
+fi
+printf 'Result of a run of %s at %s\r\n' \
+       "$(basename "$0")" "$MERGE_DATE" >temp_file
+printf 'Package pools and Packages lists were merged.\r\n' >>temp_file
+printf 'The other files stem from the first input ISO.\r\n' >>temp_file
+printf '\r\n' >>temp_file
+mount_count=0
+for i in $ISO_LIST
+do
+  mount_count=$(expr $mount_count + 1)
+  mount_point="${MOUNT_TEMPLATE}$mount_count"
+  printf 'Input ISO: %s\r\n' "$i" >>temp_file
+  head -2 "$mount_point"/README.txt >>temp_file
+  printf '\r\n' >>temp_file
+done
+printf '%s%s\r\n' " --------------------------------------" \
+                  "----------------------------------------" >>temp_file
+printf '\r\n' >>temp_file
+cat "$mount_point_1"/README.txt >>temp_file
+
+mv temp_file merged_README.txt
+echo "Done." >&2
+
+
+## Merge package description files
+echo >&2
+echo "Merging package description files ..." >&2
+
+# Determine the files which are mentioned with checksum in main Release files
+path_list=$(for i in $MOUNT_LIST
+            do
+              extract_checksum_paths "$i"/dists/"$dist"/Release
+            done | awk '{print $3}' | sort | uniq )
+
+# Merge .gz files (Release should not be merged. Unclear what others need.)
+for i in $path_list
+do
+  if echo "$i" | grep -v '.gz$' >/dev/null
+  then
+continue
+  fi
+
+  echo "Merging: merged_dists/${dist}/$i" >&2
+
+  # make missing directories in merged_dists/"$dist"/
+  if test -e "$(dirname merged_dists/"$dist"/"$i")"
+  then
+    dummy=dummy
+  else
+    if mkdir -p "$(dirname merged_dists/"$dist"/"$i")"
+    then
+      dummy=dummy
+    else
+      echo "--- Cannot create directory $(dirname merged_dists/"$dist"/"$i")" >&2
+      cleanup_and_end 3
+    fi
+  fi
+
+  test -e temp_file && rm temp_file
+  for mount_point in $MOUNT_LIST
+  do
+    if test -e "$mount_point"/dists/"$dist"/"$i"
+    then
+      if test -e temp_file
+      then
+        if test -n "$(tail -1 temp_file)"
+        then
+          echo >>temp_file
+        fi
+      fi
+      gunzip <"$mount_point"/dists/"$dist"/"$i" >>temp_file
+    fi
+  done
+  if test -e temp_file
+  then
+    gzip <temp_file >merged_dists/"$dist"/"$i"
+    rm temp_file
+  fi
+  
+done
+echo "Done." >&2
+
+
+## Update dists/"$dist"/Release
+echo >&2
+echo "Updating dists/${dist}/Release ..." >&2
+
+extract_release_head merged_dists/"$dist"/Release >temp_file
+
+# Re-create  "MD5Sum:", "SHA1:", "SHA256:", "SHA512:" sections
+for cmd in md5sum sha1sum sha256sum sha512sum
+do
+  if type "$cmd" >/dev/null
+  then
+    case "$cmd" in
+      md5sum)    echo "MD5Sum:" ;;
+      sha1sum)   echo "SHA1:" ;;
+      sha256sum) echo "SHA256:" ;;
+      sha512sum) echo "SHA512:" ;;
+    esac
+    for i in $path_list
+    do
+      file=merged_dists/"$dist"/"$i"
+      if test -e "$file"
+      then
+        sum=$("$cmd" "$file" | awk '{print $1}')
+        size=$(stat -c '%s' "$file")
+      elif test -e "$file".gz
+      then
+        sum=$(gunzip <"$file".gz | "$cmd" | awk '{print $1}')
+        size=$(gunzip <"$file".gz | wc -c)
+      else
+    continue
+      fi
+      list_path=$(echo "$file" | sed -e 's/^merged_dists\/'"$dist"'\///')
+      printf ' %s %8d %s\n' "$sum" "$size" "$list_path" 
+    done 
+  fi
+done >>temp_file
+
+mv temp_file merged_dists/"$dist"/Release
+echo "Done." >&2
+
+
+## Merge md5sum.txt and compute the MD5s which might have changed
+echo >&2
+echo "Merging md5sum.txt files ..." >&2
+
+for i in $MOUNT_LIST
+do
+  cat "$i"/md5sum.txt
+done | sort -k 2 >merged_md5sum.txt
+
+# ./pool files are surely unchanged. Others need some more examination.
+( fgrep ' ./pool/' <merged_md5sum.txt | uniq 
+  fgrep -v ' ./pool/' <merged_md5sum.txt | polish_md5sum_txt ) \
+| sort -k 2 >temp_file
+
+mv temp_file merged_md5sum.txt
+echo "Done." >&2
+
+
+## Produce the new ISO image
+echo >&2
+echo "Producing result ISO image ..." >&2
+
+# Create file with list of /pool and /firmware -map commands for all but the
+# first ISO
+for mount_point in $MOUNT_LIST
+do
+  if test "$mount_point" = "$mount_point_1"
+  then
+    echo "Planned as imported package pool     : ${mount_point}/pool" >&2
+  else
+    echo "Planned for merging into package pool: ${mount_point}/pool" >&2
+    echo " -map ${mount_point}/pool /pool" >>temp_file
+  fi
+done
+for mount_point in $MOUNT_LIST
+do
+  if test "$mount_point" = "$mount_point_1"
+  then
+    if test -d "${mount_point}/firmware"
+    then
+      echo \
+    "Planned as imported /firmware        : ${mount_point}/firmware" >&2
+    fi
+  else
+    if test -d "${mount_point}/firmware"
+    then
+      echo \
+    "Planned for merging into /firmware   : ${mount_point}/firmware" >&2
+      echo " -map ${mount_point}/firmware /firmware" >>temp_file
+    fi
+  fi
+done
+
+if test "$XORRISO" = dummy
+then
+  echo "Planned xorriso commands in temp_file:" >&2
+  cat temp_file
+  echo >&2
+  if test -n "$XORRISO_SUDO"
+  then
+    echo "NOTE: xorriso would run under control of '${XORRISO_SUDO}'" >&2
+    XORRISO_SUDO=
+  fi
+  echo 'NOTE: Variable XORRISO is set to "dummy".' >&2
+  echo '      Will not perform xorriso run but only show its arguments:' >&2
+  XORRISO=echo
+else
+  echo "Running as xorriso program: $XORRISO" >&2
+fi
+echo >&2
+
+# Mark the result path for possible removal by cleanup
+if test -z "$XORRISO_STDIO_DEV"
+then
+  EMERGING_ISO="$RESULT_ISO"
+else
+  EMERGING_ISO=
+fi
+if $XORRISO_SUDO "$XORRISO" \
+  -no_rc \
+  -indev "$iso_1" \
+  -outdev "$XORRISO_STDIO_DEV""$RESULT_ISO" \
+  $XORRISO_BLANK_CMD \
+  -options_from_file temp_file \
+  -map merged_dists /dists \
+  -map merged_md5sum.txt /md5sum.txt \
+  -map merged_README.txt /README.txt \
+  -chown_r 0 /dists /md5sum.txt /README.txt -- \
+  -chgrp_r 0 /dists /md5sum.txt /README.txt -- \
+  -chmod_r a-w /dists /md5sum.txt -- \
+  -chmod_r a=r /README.txt -- \
+  -boot_image any replay \
+  -fs 16m \
+  -stdio_sync "$XORRISO_STDIO_SYNC" \
+  -padding included \
+  -stream_recording on \
+  -joliet on \
+  -compliance no_emul_toc
+then
+  # Revoke mark for possible removal by cleanup
+  EMERGING_ISO=
+
+  test "$XORRISO" = echo || \
+    echo "Run of xorriso program ended without error indication." >&2
+else
+  echo "--- Run of xorriso program ended with error indication." >&2
+  cleanup_and_end 4
+fi
+
+
+## Finish
+
+cleanup_and_end 0
+
