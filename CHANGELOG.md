@@ -4,6 +4,39 @@
 
 ---
 
+## [0.2.0] - 2026-07-25
+
+### 版本升级 v0.1 → v0.2
+
+- **📌 版本号**: `PLXSDOS_VERSION_MINOR` 从 1 升级到 2，版本字符串更新为 `"PlexsDOS 0.2"`
+- **📌 启动横幅**: 内核启动横幅更新为 `Nexsteaduser PlexsDOS v0.2`，副标题修正为 `x86 32-bit Monolithic Kernel OS`
+- **📌 Shell VER 命令**: 不再硬编码版本号，改为使用 `PLXSDOS_VERSION_STRING` 宏，输出标注 `(Monolithic Kernel)`
+- **📌 Shell UNAME 命令**: 使用 `PLXSDOS_VERSION_MAJOR/MINOR` 宏动态输出版本号
+- **📌 GUI About 对话框**: 桌面底部和"关于"窗口中硬编码的 `v1.0` 统一更新为 `v0.2`
+
+### Git 分支推送规范
+
+- **🔧 分支规范强制执行**:
+  - GitCode (`main` 分支)、Gitee (`master` 分支)、GitHub (`master` 分支)、内网 origin (`main` 分支)
+  - 每个远程仓库配置了 `remote.<name>.push` refspec，直接 `git push <remote>` 自动推送至正确分支
+- **🔧 内网仓库地址修正**: 从 `10.31.3.37` 更正为 `10.31.1.37:8418`
+- **🔧 哈希算法**: 内网 Gitea 服务器已升级至 SHA-256，本地仓库保留 SHA-1（兼容 GitCode/Gitee/GitHub），内网通过 SHA-256 镜像仓库推送
+- **🔧 GitHub 远程**: 新增 `github` 远程仓库（`https://github.com/Tinmc189623/PlexsDOS.git`），目标分支 `master`
+
+### 宏内核架构完善
+
+- **🔧 内核代码重构（续）**: 启动状态输出辅助函数 `boot_ok/boot_skip/boot_fail/boot_info` 在整个初始化序列中全面应用
+- **🔧 HAL 块设备注册**: 合并分散的静态代码块，使用 C99 指定初始化器
+- **🔧 启动日志完整性**: ISA 枚举跳过、CONFIG.SYS 解析等场景补全状态输出
+
+### 文档更新
+
+- **📝 README.md**: 新增 Version v0.2 badge，更新宏内核描述
+- **📝 Kernel-Architecture.md**: 完善中断向量分配表、内存布局、启动时序
+- **📝 项目内存**: 记录 Git 分支推送规范到 project_memory.md
+
+---
+
 ## [0.1.0] - 2025-07-25
 
 ### 架构定位修正（重要）

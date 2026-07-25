@@ -402,7 +402,7 @@ static void pm_paint(int win_id, int x, int y, int width, int height)
 
     /* 系统信息 */
     gfx_draw_string(x + 10, y + height - 30,
-                    "PlexsDOS v1.0 - Nexsteaduser",
+                    "PlexsDOS v0.2 - Nexsteaduser",
                     COLOR_DARK_GRAY, GUI_COLOR_WINDOW_BG);
 }
 
@@ -843,7 +843,7 @@ static void about_paint(int win_id, int x, int y, int width, int height)
     gfx_draw_rect(cx - 16, y + 15, 32, 32, COLOR_BLACK);
 
     /* 文字 */
-    gfx_draw_string(cx - 70, y + 55, "PlexsDOS v1.0", COLOR_BLACK, GUI_COLOR_WINDOW_BG);
+    gfx_draw_string(cx - 70, y + 55, "PlexsDOS v0.2", COLOR_BLACK, GUI_COLOR_WINDOW_BG);
     gfx_draw_string(cx - 80, y + 55 + FONT_HEIGHT + 4,
                     "Nexsteaduser OS Project", COLOR_DARK_GRAY, GUI_COLOR_WINDOW_BG);
     gfx_draw_string(cx - 60, y + 55 + 2 * (FONT_HEIGHT + 4),

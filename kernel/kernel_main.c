@@ -187,8 +187,8 @@ void kernel_main(void)
     vga_dbg(0, 'S');
     serial_puts("[PlexsDOS] screen OK.\n");
 
-    print_banner("        Nexsteaduser PlexsDOS  v0.1\n",
-                 "        x86 32-bit  Protected Mode OS\n");
+    print_banner("        Nexsteaduser PlexsDOS  v0.2\n",
+                 "        x86 32-bit  Monolithic Kernel OS\n");
     serial_puts("[PlexsDOS] system started.\n");
 
     /*

@@ -488,7 +488,9 @@ static void cmd_cls(void)
 
 static void cmd_ver(void)
 {
-    screen_puts("Nexsteaduser PlexsDOS v0.1\n");
+    screen_puts("Nexsteaduser ");
+    screen_puts(PLXSDOS_VERSION_STRING);
+    screen_puts(" (Monolithic Kernel)\n");
     screen_puts("Author: Tinmc189623 | Team: Nexlyh\n");
     screen_puts("Kernel: 32-bit protected mode\n");
     screen_puts("x86 i686, self-written from scratch\n\n");
@@ -497,7 +499,11 @@ static void cmd_ver(void)
 static void cmd_uname(const char *args)
 {
     (void)args;
-    screen_puts("PlexsDOS x86_32 0.1\n");
+    screen_puts("PlexsDOS x86_32 ");
+    screen_put_dec(PLXSDOS_VERSION_MAJOR);
+    screen_putchar('.');
+    screen_put_dec(PLXSDOS_VERSION_MINOR);
+    screen_putchar('\n');
 }
 
 /* ---------- VOL ---------- */

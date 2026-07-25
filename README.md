@@ -3,6 +3,7 @@
 > Nexsteaduser 自研 x86 32 位保护模式宏内核操作系统，使用 C / C++ / NASM 从零构建。
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
+[![Version: v0.2](https://img.shields.io/badge/Version-v0.2-purple.svg)]()
 [![Platform: x86 32-bit](https://img.shields.io/badge/Platform-x86%2032--bit-orange.svg)]()
 [![Kernel: Monolithic](https://img.shields.io/badge/Kernel-Monolithic-green.svg)]()
 [![Build: GCC + NASM + CMake](https://img.shields.io/badge/Build-GCC%20%2B%20NASM%20%2B%20CMake-lightgrey.svg)]()

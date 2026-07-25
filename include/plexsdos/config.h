@@ -9,8 +9,8 @@
 
 /* 版本信息 */
 #define PLXSDOS_VERSION_MAJOR  0
-#define PLXSDOS_VERSION_MINOR  1
-#define PLXSDOS_VERSION_STRING "PlexsDOS 0.1"
+#define PLXSDOS_VERSION_MINOR  2
+#define PLXSDOS_VERSION_STRING "PlexsDOS 0.2"
 
 /* 内存布局 */
 #define KERNEL_LOAD_ADDR      0x30000  /* 内核加载地址 (ES=0x3000, BX=0x0000, 避免 BX 溢出) */
