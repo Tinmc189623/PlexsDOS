@@ -84,7 +84,7 @@ OBJS := $(patsubst %.asm,$(BUILD_DIR)/%.o,$(SRCS_S)) \
         $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(SRCS_CXX))
 
 BOOT_OBJ  = $(BUILD_DIR)/boot/boot_sector.o
-KERN_OBJS = $(filter-out $(BUILD_DIR)/boot/%,$(OBJS)) $(CONFIG_SYS_O)
+KERN_OBJS = $(filter-out $(BUILD_DIR)/boot/%,$(OBJS)) $(CONFIG_SYS_O) $(USER_SHELL_O)
 
 BOOT_BIN   = $(BUILD_DIR)/boot.bin
 KERNEL_BIN = $(BUILD_DIR)/kernel.bin
@@ -107,6 +107,11 @@ PROG_HELLO_COMX = $(BUILD_DIR)/programs/HELLO.COMX
 # CONFIG.SYS 启动配置文件 (嵌入内核二进制)
 CONFIG_SYS_SRC = programs/CONFIG.SYS
 CONFIG_SYS_O   = $(BUILD_DIR)/programs/config_sys_embed.o
+
+# 用户态 Shell (嵌入内核, 启动时复制到 0x50000, nasm -f bin 直接编译)
+USER_SHELL_SRC = programs/user_shell.asm
+USER_SHELL_O   = $(BUILD_DIR)/programs/user_shell_embed.o
+USER_SHELL_BIN = $(BUILD_DIR)/programs/user_shell.bin
 
 # PnP 管理器
 PROG_PNP_SRC = programs/pnp.asm
@@ -153,6 +158,17 @@ $(BUILD_DIR)/%.o: %.cpp
 $(BUILD_DIR)/programs/config_sys_embed.o: programs/CONFIG.SYS
 	@mkdir -p $(dir $@)
 	$(OBJCOPY) -I binary -O pe-i386 -B i386 $< $@
+
+# 编译用户态 Shell (nasm -f bin 直接生成 flat binary, org 0x50000, 嵌入内核)
+# 在 $(BUILD_DIR) 中运行 objcopy, 输入路径为 programs/user_shell.bin,
+# 这样生成的符号名为 binary_programs_user_shell_bin_start/end
+$(USER_SHELL_BIN): $(USER_SHELL_SRC)
+	@mkdir -p $(dir $@)
+	$(AS) -f bin -Iinclude $< -o $@
+
+$(USER_SHELL_O): $(USER_SHELL_BIN)
+	@mkdir -p $(dir $@)
+	cd $(BUILD_DIR) && $(OBJCOPY) -I binary -O pe-i386 -B i386 programs/user_shell.bin programs/user_shell_embed.o
 
 # hd_boot.asm 使用 incbin 嵌入 MBR/VBR 二进制, 必须先编译 MBR/VBR
 $(BUILD_DIR)/kernel/hd_boot.o: kernel/hd_boot.asm $(HD_MBR_BIN) $(HD_VBR_BIN)

@@ -42,7 +42,8 @@ struct pcb {
     uint32_t flags;            /* 进程标志 */
     uint32_t esp;              /* 保存的内核栈指针 */
     uint32_t ss;               /* 保存的栈段 */
-    uint32_t kernel_esp;       /* 进程的内核栈 (用于 Ring 3 进程) */
+    uint32_t kernel_esp;       /* 进程的内核栈 (上下文切换时的 ESP, 指向 pusha 结构) */
+    uint32_t kernel_esp_top;   /* 内核栈顶 (用于 TSS ESP0) */
     uint32_t page_dir;         /* 页目录基址 (future: 进程独立地址空间) */
     uint32_t time_slice;       /* 时间片 (tick 数) */
     uint32_t ticks_remaining;  /* 剩余 tick 数 */
@@ -66,6 +67,14 @@ struct ready_queue {
  * 初始化 PCB 池、就绪队列, 创建空闲进程 (idle)。
  */
 void sched_init(void);
+
+/*
+ * sched_start — 启动调度器
+ *
+ * 从内核主流程切换到就绪队列中的第一个进程。
+ * 此函数不会返回 (除非就绪队列为空, 此时返回)。
+ */
+void sched_start(void);
 
 /* ===== 进程管理 ===== */
 
@@ -115,9 +124,35 @@ void sched_yield(void);
  * sched_tick — 时钟 tick (由定时器中断周期性调用)
  *
  * 递减当前进程的时间片剩余计数。
- * 如果时间片用完, 触发进程切换。
+ * 在 C 中断处理程序中调用, 仅更新计数,
+ * 是否切换由 sched_need_resched() 判断, 由汇编入口执行。
  */
 void sched_tick(void);
+
+/*
+ * sched_need_resched — 检查是否需要进程切换
+ * 返回: 1 = 需要切换, 0 = 继续当前进程
+ */
+int sched_need_resched(void);
+
+/*
+ * sched_do_switch_asm — 从汇编中断入口执行进程切换
+ * @context_esp: 当前被中断进程的内核栈 (指向 pushad 的 EDI, 即栈顶)
+ *
+ * 保存 context_esp 到 current->kernel_esp, 选择下一个进程,
+ * 调用 sched_restore_context 跳转。
+ * 如果选择的下一个进程就是当前进程 (next == current), 直接返回。
+ */
+void sched_do_switch_asm(uint32_t context_esp);
+
+/*
+ * sched_exit_asm — 从系统调用中断入口终止当前进程
+ * @context_esp: 当前进程的内核栈指针
+ * @status: 退出状态码
+ *
+ * 由 SYS_EXIT 系统调用调用。
+ */
+void sched_exit_asm(uint32_t context_esp, int status);
 
 /*
  * sched_block — 阻塞当前进程

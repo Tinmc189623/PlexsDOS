@@ -14,6 +14,11 @@
 #include <plexsdos/config.h>
 #include <plexsdos/pci.h>
 #include <plexsdos/isa.h>
+#include <plexsdos/fs.h>
+#include <plexsdos/loader.h>
+#include <plexsdos/syscall.h>
+#include <plexsdos/shell.h>
+#include <plexsdos/scheduler.h>
 
 /* 外部 C 函数 */
 extern "C" {
@@ -140,12 +145,7 @@ void SyscallDispatcher::handle(uint32_t vector, uint32_t error_code)
  * @esi: 附加参数
  * 返回: 0=正常, 1=程序请求终止。
  *
- * 实现 DOS 兼容的 INT 21h 功能:
- *   AH=0x01: 读字符并回显
- *   AH=0x02: 写字符 (DL=字符)
- *   AH=0x09: 写字符串 (EDX=地址, '$'结尾)
- *   AH=0x0A: 读字符串 (EDX=缓冲区)
- *   AH=0x4C: 程序终止 (AL=返回码)
+ * 实现 DOS 兼容的 INT 21h 功能和 PlexsDOS 扩展功能。
  */
 uint32_t SyscallDispatcher::dispatch_syscall(uint32_t eax,
                                              uint32_t edx,
@@ -154,19 +154,20 @@ uint32_t SyscallDispatcher::dispatch_syscall(uint32_t eax,
     uint8_t func = (uint8_t)((eax >> 8) & 0xFF);
     uint8_t al = (uint8_t)(eax & 0xFF);
     uint8_t dl = (uint8_t)(edx & 0xFF);
-    (void)esi;
+    uint8_t dh = (uint8_t)((edx >> 8) & 0xFF);
 
     switch (func) {
-    case 0x01: { /* SYS_READ_CHAR */
+    /* ===== DOS 兼容功能 ===== */
+    case SYS_READ_CHAR: {
         char c = keyboard_getchar();
         return (uint32_t)(uint8_t)c;
     }
 
-    case 0x02: /* SYS_WRITE_CHAR */
+    case SYS_WRITE_CHAR:
         screen_putchar((char)dl);
         return 0;
 
-    case 0x09: { /* SYS_WRITE_STR */
+    case SYS_WRITE_STR: {
         const char *str = (const char *)edx;
         while (*str && *str != '$') {
             screen_putchar(*str);
@@ -175,7 +176,7 @@ uint32_t SyscallDispatcher::dispatch_syscall(uint32_t eax,
         return 0;
     }
 
-    case 0x0A: { /* SYS_READ_STR */
+    case SYS_READ_STR: {
         char *buf = (char *)edx;
         uint8_t max_len = (uint8_t)buf[0];
         if (max_len < 2)
@@ -188,36 +189,118 @@ uint32_t SyscallDispatcher::dispatch_syscall(uint32_t eax,
         return 0;
     }
 
-    case 0x4C: /* SYS_EXIT */
-        screen_puts("\n[exit code ");
-        screen_put_dec((uint32_t)al);
-        screen_puts("]\n");
+    case SYS_EXIT:
         m_exit_flag = true;
         return 1;
 
-    case 0x30: { /* SYS_PNP_PCI_COUNT */
+    /* ===== PlexsDOS 扩展: 屏幕控制 ===== */
+    case SYS_CLEAR_SCREEN:
+        screen_clear();
+        return 0;
+
+    case SYS_SET_COLOR:
+        screen_set_color(dl, dh);
+        return 0;
+
+    case SYS_RESET_COLOR:
+        screen_reset_color();
+        return 0;
+
+    case SYS_PUT_DEC:
+        screen_put_dec(edx);
+        return 0;
+
+    case SYS_PUT_HEX:
+        screen_put_hex(edx);
+        return 0;
+
+    /* ===== PlexsDOS 扩展: 进程/文件 ===== */
+    case SYS_EXEC: {
+        const char *filename = (const char *)edx;
+        char name_buf[64];
+        int i = 0;
+        while (filename[i] && filename[i] != '$' && i < 63) {
+            name_buf[i] = filename[i];
+            i++;
+        }
+        name_buf[i] = '\0';
+        loader_run(name_buf);
+        return 0;
+    }
+
+    case SYS_FS_LIST:
+        fs_list_root();
+        return 0;
+
+    case SYS_FS_READ: {
+        const char *filename = (const char *)edx;
+        uint8_t *buf = (uint8_t *)esi;
+        char name_buf[64];
+        int i = 0;
+        while (filename[i] && filename[i] != '$' && i < 63) {
+            name_buf[i] = filename[i];
+            i++;
+        }
+        name_buf[i] = '\0';
+        struct fs_entry *entry = fs_find_file(name_buf);
+        if (!entry)
+            return 0xFFFFFFFF;
+        uint32_t size = fs_load_file(entry, (uint32_t)buf);
+        return size;
+    }
+
+    case SYS_GET_DRIVE:
+        return (uint32_t)fs_get_current_drive();
+
+    case SYS_SET_DRIVE:
+        fs_set_current_drive((char)dl);
+        return 0;
+
+    case SYS_REBOOT:
+        __asm__ __volatile__("mov $0xFE, %%al\n\tout %%al, $0x64" : : : "ax", "memory");
+        __asm__ __volatile__("cli\n\tlidt (%%eax)\n\tint $0x00" : : "a"(0) : "memory");
+        while (1) __asm__ __volatile__("hlt");
+        return 0;
+
+    case SYS_GET_VERSION:
+        return (PLXSDOS_VERSION_MAJOR << 8) | PLXSDOS_VERSION_MINOR;
+
+    case SYS_SHELL_CMD: {
+        const char *cmd = (const char *)edx;
+        char cmd_buf[128];
+        int i = 0;
+        while (cmd[i] && cmd[i] != '$' && i < 127) {
+            cmd_buf[i] = cmd[i];
+            i++;
+        }
+        cmd_buf[i] = '\0';
+        shell_exec_cmd(cmd_buf);
+        return 0;
+    }
+
+    /* ===== PnP 设备枚举 ===== */
+    case SYS_PNP_PCI_COUNT: {
         return (uint32_t)pci_device_count();
     }
 
-    case 0x31: { /* SYS_PNP_PCI_GET */
-        int pci_idx = (int)edx;          /* EDX = 设备索引 */
-        struct pci_device *buf = (struct pci_device *)esi;  /* ESI = 缓冲区 */
+    case SYS_PNP_PCI_GET: {
+        int pci_idx = (int)edx;
+        struct pci_device *buf = (struct pci_device *)esi;
         struct pci_device *dev = pci_get_device(pci_idx);
         if (!dev)
             return 0xFFFFFFFF;
-        /* 拷贝设备信息到用户缓冲区 (identity-mapped) */
         for (int i = 0; i < (int)sizeof(struct pci_device); i++)
             ((uint8_t *)buf)[i] = ((uint8_t *)dev)[i];
         return 0;
     }
 
-    case 0x32: { /* SYS_PNP_ISA_COUNT */
+    case SYS_PNP_ISA_COUNT: {
         return (uint32_t)isa_device_count();
     }
 
-    case 0x33: { /* SYS_PNP_ISA_GET */
-        int isa_idx = (int)edx;          /* EDX = 设备索引 */
-        struct isa_device *buf = (struct isa_device *)esi;  /* ESI = 缓冲区 */
+    case SYS_PNP_ISA_GET: {
+        int isa_idx = (int)edx;
+        struct isa_device *buf = (struct isa_device *)esi;
         struct isa_device *dev = isa_get_device(isa_idx);
         if (!dev)
             return 0xFFFFFFFF;

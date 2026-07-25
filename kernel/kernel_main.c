@@ -112,6 +112,9 @@ extern uint8_t boot_drive;
 extern void fast_mem_init(void);
 extern void *fast_memcpy(void *dst, const void *src, unsigned n);
 
+/* PIT 定时器初始化 (kernel/arch/pit.c) */
+extern void pit_init(void);
+
 /* FDC 块设备操作包装 (去除 drive 参数) */
 static bool fdc0_read(uint32_t lba, uint8_t count, void *buf)
 {
@@ -462,10 +465,58 @@ void kernel_main(void)
     } else {
         serial_puts("[PlexsDOS] boot source: hard disk (DL >= 0x80).\n");
         boot_ok("Boot source: hard disk");
+
+        /*
+         * ===== 宏内核架构: 启动用户态 Shell (Ring 3) =====
+         * 内核核心功能 (内存管理、调度器、文件系统、驱动) 运行在 Ring 0,
+         * 用户程序 (Shell、应用程序) 运行在 Ring 3, 通过 INT 0x22 系统调用
+         * 请求内核服务。这是宏内核 (Monolithic Kernel) 的正确设计:
+         * 虽然所有内核子系统都在同一个地址空间 (Ring 0) 运行,
+         * 但用户应用程序被隔离在用户态, 通过系统调用接口与内核交互。
+         */
+
+        /* 嵌入的用户态 Shell 二进制符号 (由 objcopy 生成)
+         * 注意: 文件名 user_shell.bin 中的点被 objcopy 替换为下划线,
+         * 所以符号名包含 _bin_ 中缀: binary_programs_user_shell_bin_start/end */
+        extern const char binary_programs_user_shell_bin_start[];
+        extern const char binary_programs_user_shell_bin_end[];
+
+        uint32_t shell_size = (uint32_t)(binary_programs_user_shell_bin_end -
+                                          binary_programs_user_shell_bin_start);
+
+        /* 复制用户态 Shell 到用户空间加载地址 0x50000 */
+        if (shell_size > 0 && shell_size < (USER_STACK_TOP - USER_LOAD_ADDR)) {
+            fast_memcpy((void *)USER_LOAD_ADDR,
+                        binary_programs_user_shell_bin_start,
+                        shell_size);
+            boot_ok("User-mode shell copied to 0x50000");
+
+            /* 初始化 PIT 定时器 (100Hz, 为调度器提供时间基准) */
+            pit_init();
+            boot_ok("PIT timer initialized (100 Hz)");
+
+            /* 创建用户态 Shell 进程 (Ring 3, 入口 0x50000, 用户栈顶 0x81000) */
+            sched_create_process("user_shell",
+                                 USER_LOAD_ADDR,
+                                 USER_STACK_TOP,
+                                 PROC_FLAG_USER);
+            boot_ok("User shell process created");
+
+            /* 打印欢迎横幅 */
+            print_banner("       Welcome to Nexsteaduser PlexsDOS\n", NULL);
+            screen_putchar('\n');
+
+            /* 启动调度器 — 此函数不返回, 直接切换到第一个用户进程 */
+            serial_puts("[PlexsDOS] starting scheduler...\n");
+            sched_start();
+        } else {
+            boot_fail("User shell binary too large or missing");
+            for (;;)
+                __asm__ __volatile__("cli; hlt");
+        }
     }
 
-    /* 正常启动 Shell */
-    print_banner("       Welcome to Nexsteaduser PlexsDOS\n", NULL);
-    screen_putchar('\n');
-    shell_main();
+    /* 不应到达此处: sched_start() 不返回 */
+    for (;;)
+        __asm__ __volatile__("cli; hlt");
 }

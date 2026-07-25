@@ -76,3 +76,16 @@ void gdt_init(void)
     /* 加载 GDT + ltr (汇编函数) */
     gdt_load();
 }
+
+/*
+ * tss_set_esp0 — 更新 TSS 的 ESP0 字段
+ * @esp0: Ring 0 栈顶地址
+ *
+ * 进程切换时调用, 设置 CPU 从 Ring 3 进入 Ring 0 (中断/系统调用)
+ * 时自动切换到的内核栈指针。
+ */
+void tss_set_esp0(uint32_t esp0)
+{
+    uint32_t *tss32 = (uint32_t *)tss;
+    tss32[1] = esp0;  /* TSS offset 0x04 = ESP0 */
+}

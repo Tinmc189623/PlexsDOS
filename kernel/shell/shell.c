@@ -1858,3 +1858,20 @@ void shell_main(void)
         shell_exec(cmd_buf);
     }
 }
+
+/*
+ * shell_exec_cmd — 执行单条 Shell 命令
+ * @cmd: 命令字符串 (以 '\0' 结尾)
+ *
+ * 供系统调用使用, 用户态 Shell 通过 SYS_SHELL_CMD 调用。
+ * 此函数是 shell_exec() 的公开包装。
+ */
+void shell_exec_cmd(const char *cmd)
+{
+    char local_cmd[128];
+    int i;
+    for (i = 0; cmd[i] && i < 127; i++)
+        local_cmd[i] = cmd[i];
+    local_cmd[i] = '\0';
+    shell_exec(local_cmd);
+}

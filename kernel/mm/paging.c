@@ -71,8 +71,11 @@ void paging_init(void)
         page_table_0[i] = (i * PAGE_SIZE) | flags;
     }
 
-    /* 页目录条目 0 → 页表 0 */
-    page_directory[0] = (uint32_t)page_table_0 | PAGE_PRESENT | PAGE_WRITABLE;
+    /* 页目录条目 0 → 页表 0
+     * 注意: PDE 必须设置 PAGE_USER 标志, 否则即使 PTE 设置了 USER 位,
+     * Ring 3 访问前 4MB 中任何地址都会触发 #PF (页故障)。
+     * 内核页面在 PTE 级别保持 Supervisor 标志, Ring 3 仍然无法访问。 */
+    page_directory[0] = (uint32_t)page_table_0 | PAGE_PRESENT | PAGE_WRITABLE | PAGE_USER;
 
     if (has_pse) {
         /*

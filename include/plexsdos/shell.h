@@ -11,8 +11,17 @@
 extern "C" {
 #endif
 
-/* Shell 主循环 (永不返回) */
+/* Shell 主循环 (内核态, 旧接口) */
 void shell_main(void);
+
+/*
+ * shell_exec_cmd — 执行单条 Shell 命令
+ * @cmd: 命令字符串 (以 '\0' 结尾)
+ *
+ * 供系统调用使用, 用户态 Shell 通过 SYS_SHELL_CMD 调用。
+ * 执行命令后返回。
+ */
+void shell_exec_cmd(const char *cmd);
 
 #ifdef __cplusplus
 }
