@@ -55,6 +55,56 @@ static void print_banner(const char *title, const char *subtitle)
     screen_set_color(0x07, 0x00);
 }
 
+/*
+ * boot_ok / boot_skip / boot_fail / boot_info — 启动状态输出辅助函数
+ *
+ * 消除初始化序列中反复出现的 "设置颜色→打印标记→恢复颜色→打印消息" 四行模式。
+ * 颜色方案:
+ *   [OK]  绿色 (0x0A) — 子系统初始化成功
+ *   [--]  黄色 (0x0E) — 设备不存在/跳过 (非致命)
+ *   [!!]  红色 (0x0C) — 致命错误
+ *   [II]  黄色 (0x0E) — 信息提示
+ */
+static void boot_ok(const char *msg)
+{
+    screen_set_color(0x0A, 0x00);
+    screen_puts("  [OK]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" ");
+    screen_puts(msg);
+    screen_puts("\n");
+}
+
+static void boot_skip(const char *msg)
+{
+    screen_set_color(0x0E, 0x00);
+    screen_puts("  [--]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" ");
+    screen_puts(msg);
+    screen_puts("\n");
+}
+
+static void boot_fail(const char *msg)
+{
+    screen_set_color(0x0C, 0x00);
+    screen_puts("  [!!]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" ");
+    screen_puts(msg);
+    screen_puts("\n");
+}
+
+static void boot_info(const char *msg)
+{
+    screen_set_color(0x0E, 0x00);
+    screen_puts("  [II]");
+    screen_set_color(0x07, 0x00);
+    screen_puts(" ");
+    screen_puts(msg);
+    screen_puts("\n");
+}
+
 /* 启动驱动器号 (由 kernel_entry.S 从 BIOS DL 寄存器保存) */
 extern uint8_t boot_drive;
 
@@ -154,22 +204,19 @@ void kernel_main(void)
     vga_dbg(1, 'C');
     serial_puts("[PlexsDOS] CPU OK.\n");
     fast_mem_init();  /* 缓存最优内存操作路径 */
-    screen_set_color(0x0A, 0x00);  /* 绿色 OK */
+    screen_set_color(0x0A, 0x00);
     screen_puts("  [OK]");
     screen_set_color(0x07, 0x00);
-    screen_puts(" CPU initialized");
-    /* 读取 CPU 厂商字符串 (从 GDT 加载后的区域) */
+    screen_puts(" CPU initialized (");
     {
         char vendor[13];
         uint32_t *vp = (uint32_t *)vendor;
         __asm__ __volatile__("xor %%eax, %%eax; cpuid"
             : "=b"(vp[0]), "=c"(vp[2]), "=d"(vp[1]) : "a"(0));
         vendor[12] = '\0';
-        screen_puts(" (");
         screen_puts(vendor);
-        screen_puts(")");
     }
-    screen_putchar('\n');
+    screen_puts(")\n");
 
     /* ---- 解析 CONFIG.SYS (使用 fast_memcpy) ---- */
     config_sys_init();
@@ -188,10 +235,7 @@ void kernel_main(void)
             fast_memcpy(cfg_buf, binary_programs_CONFIG_SYS_start, cfg_len);
             cfg_buf[cfg_len] = '\0';
             config_sys_parse(cfg_buf);
-            screen_set_color(0x0A, 0x00);
-            screen_puts("  [OK]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" CONFIG.SYS loaded\n");
+            boot_ok("CONFIG.SYS loaded");
         }
     }
 
@@ -199,73 +243,49 @@ void kernel_main(void)
     gdt_init();
     vga_dbg(2, 'G');
     serial_puts("[PlexsDOS] GDT OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" GDT loaded (Ring 0-3 segments)\n");
+    boot_ok("GDT loaded (Ring 0-3 segments)");
 
     /* ---- 分页 ---- */
     paging_init();
     vga_dbg(3, 'P');
     serial_puts("[PlexsDOS] paging OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" Paging enabled (4KB pages)\n");
+    boot_ok("Paging enabled (4KB pages)");
 
     /* ---- IDT + PIC ---- */
     idt_init();
     vga_dbg(4, 'I');
     serial_puts("[PlexsDOS] IDT OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" IDT initialized (256 vectors)\n");
+    boot_ok("IDT initialized (256 vectors)");
 
     /* ---- 异常处理 ---- */
     panic_init();
     vga_dbg(5, 'X');
     serial_puts("[PlexsDOS] panic OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" Exception handlers installed\n");
+    boot_ok("Exception handlers installed");
 
     /* ---- 键盘 ---- */
     keyboard_init();
     vga_dbg(6, 'K');
     serial_puts("[PlexsDOS] keyboard OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" PS/2 keyboard ready\n");
+    boot_ok("PS/2 keyboard ready");
 
     /* ---- 鼠标 ---- */
     mouse_init();
     vga_dbg(7, 'M');
     serial_puts("[PlexsDOS] mouse OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" PS/2 mouse ready\n");
+    boot_ok("PS/2 mouse ready");
 
     /* ---- 启用中断 ---- */
     __asm__ __volatile__("sti");
     vga_dbg(8, 'T');
     serial_puts("[PlexsDOS] sti OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" Interrupts enabled\n");
+    boot_ok("Interrupts enabled");
 
     /* ---- PCI ---- */
     pci_init();
     vga_dbg(9, 'B');
     serial_puts("[PlexsDOS] PCI OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" PCI bus enumerated\n");
+    boot_ok("PCI bus enumerated");
 
     /* ---- AHCI SATA ---- */
     {
@@ -273,16 +293,10 @@ void kernel_main(void)
         if (ahci_ok) {
             disk_set_override(ahci_read_wrap, ahci_write_wrap);
             serial_puts("[PlexsDOS] AHCI SATA OK.\n");
-            screen_set_color(0x0A, 0x00);
-            screen_puts("  [OK]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" AHCI SATA controller ready\n");
+            boot_ok("AHCI SATA controller ready");
         } else {
             serial_puts("[PlexsDOS] no AHCI.\n");
-            screen_set_color(0x0E, 0x00);
-            screen_puts("  [--]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" No AHCI controller (fallback to ATA)\n");
+            boot_skip("No AHCI controller (fallback to ATA)");
         }
     }
 
@@ -295,16 +309,10 @@ void kernel_main(void)
         serial_puts("[PlexsDOS] FDC OK.\n");
         drive_register(DRIVE_LETTER_A, DRIVE_TYPE_FLOPPY, 0, 0);
         drive_register(DRIVE_LETTER_B, DRIVE_TYPE_FLOPPY, 1, 0);
-        screen_set_color(0x0A, 0x00);
-        screen_puts("  [OK]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" Floppy controller ready (A: B:)\n");
+        boot_ok("Floppy controller ready (A: B:)");
     } else {
         serial_puts("[PlexsDOS] no FDC.\n");
-        screen_set_color(0x0E, 0x00);
-        screen_puts("  [--]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" No floppy controller\n");
+        boot_skip("No floppy controller");
     }
 
     /* ---- ATA/AHCI 磁盘 + FAT32 ---- */
@@ -320,24 +328,15 @@ void kernel_main(void)
 
         if (disk_ok) {
             vga_dbg(11, 'd');
-            screen_set_color(0x0A, 0x00);
-            screen_puts("  [OK]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" ATA/ATAPI disk detected\n");
+            boot_ok("ATA/ATAPI disk detected");
 
             if (fat32_init()) {
                 serial_puts("[PlexsDOS] FAT32 OK.\n");
                 drive_register(DRIVE_LETTER_C, DRIVE_TYPE_HDD, 0, 2048);
-                screen_set_color(0x0A, 0x00);
-                screen_puts("  [OK]");
-                screen_set_color(0x07, 0x00);
-                screen_puts(" FAT32 filesystem mounted (C:)\n");
+                boot_ok("FAT32 filesystem mounted (C:)");
             } else {
                 serial_puts("[PlexsDOS] FAT32 FAIL.\n");
-                screen_set_color(0x0C, 0x00);
-                screen_puts("  [!!]");
-                screen_set_color(0x07, 0x00);
-                screen_puts(" FAT32 mount failed\n");
+                boot_fail("FAT32 mount failed");
             }
 
             /* MBR 分区扫描 */
@@ -364,19 +363,13 @@ void kernel_main(void)
                     }
                     if (extra_count > 0) {
                         serial_puts("[PlexsDOS] extra partitions registered.\n");
-                        screen_set_color(0x0A, 0x00);
-                        screen_puts("  [OK]");
-                        screen_set_color(0x07, 0x00);
-                        screen_puts(" Extra partitions scanned\n");
+                        boot_ok("Extra partitions scanned");
                     }
                 }
             }
         } else {
             serial_puts("[PlexsDOS] no disk.\n");
-            screen_set_color(0x0E, 0x00);
-            screen_puts("  [--]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" No disk drive found\n");
+            boot_skip("No disk drive found");
         }
     }
 
@@ -385,60 +378,32 @@ void kernel_main(void)
         vga_dbg(12, 'R');
         serial_puts("[PlexsDOS] CD-ROM OK.\n");
         drive_register(DRIVE_LETTER_D, DRIVE_TYPE_CDROM, 0, 0);
-        screen_set_color(0x0A, 0x00);
-        screen_puts("  [OK]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" CD-ROM drive ready (D:)\n");
+        boot_ok("CD-ROM drive ready (D:)");
         if (iso9660_mount()) {
             serial_puts("[PlexsDOS] ISO9660 OK.\n");
-            screen_set_color(0x0A, 0x00);
-            screen_puts("  [OK]");
-            screen_set_color(0x07, 0x00);
-            screen_puts(" ISO 9660 filesystem mounted\n");
+            boot_ok("ISO 9660 filesystem mounted");
         }
     } else {
-        screen_set_color(0x0E, 0x00);
-        screen_puts("  [--]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" No CD-ROM drive\n");
+        boot_skip("No CD-ROM drive");
     }
 
     /* ---- C++ 中断管理器 + 系统调用 ---- */
     interrupt_manager_init();
     vga_dbg(13, 'M');
     serial_puts("[PlexsDOS] INT OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" System call handler ready (INT 0x22)\n");
+    boot_ok("System call handler ready (INT 0x22)");
 
     /* ===== HAL 块设备注册 ===== */
     {
-        static struct hal_blkdev_ops fdc0_ops;
-        fdc0_ops.read  = fdc0_read;
-        fdc0_ops.write = NULL;
+        static struct hal_blkdev_ops fdc0_ops = { .read = fdc0_read, .write = NULL };
+        static struct hal_blkdev_ops fdc1_ops = { .read = fdc1_read, .write = NULL };
+        static struct hal_blkdev_ops ata_ops  = { .read = disk_read_sectors, .write = disk_write_sectors };
         hal_blkdev_register(HAL_BLKDEV_FLOPPY, 0, &fdc0_ops);
-    }
-    {
-        static struct hal_blkdev_ops fdc1_ops;
-        fdc1_ops.read  = fdc1_read;
-        fdc1_ops.write = NULL;
         hal_blkdev_register(HAL_BLKDEV_FLOPPY, 1, &fdc1_ops);
-    }
-
-    /* ATA 块设备操作 */
-    {
-        static struct hal_blkdev_ops ata_ops;
-        ata_ops.read  = disk_read_sectors;
-        ata_ops.write = disk_write_sectors;
         hal_blkdev_register(HAL_BLKDEV_ATA, 0, &ata_ops);
     }
-
     serial_puts("[PlexsDOS] HAL block devices registered.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" HAL block device layer ready\n");
+    boot_ok("HAL block device layer ready");
 
     /* ===== ISA 传统设备枚举 =====
      * perf: 软盘/El Torito 启动 (DL < 0x80) 时系统不带 ISA 设备,
@@ -447,30 +412,22 @@ void kernel_main(void)
     if (boot_drive >= 0x80) {
         isa_init();
         serial_puts("[PlexsDOS] ISA devices enumerated.\n");
-        screen_set_color(0x0A, 0x00);
-        screen_puts("  [OK]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" ISA legacy devices enumerated\n");
+        boot_ok("ISA legacy devices enumerated");
     } else {
         serial_puts("[PlexsDOS] skip ISA enumeration (removable boot).\n");
+        boot_info("ISA enumeration skipped (removable boot)");
     }
 
     /* ===== 进程调度器初始化 ===== */
     sched_init();
     vga_dbg(14, 'S');
     serial_puts("[PlexsDOS] scheduler OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" Process scheduler initialized\n");
+    boot_ok("Process scheduler initialized");
 
     /* ===== 用户系统初始化 ===== */
     users_init();
     serial_puts("[PlexsDOS] users OK.\n");
-    screen_set_color(0x0A, 0x00);
-    screen_puts("  [OK]");
-    screen_set_color(0x07, 0x00);
-    screen_puts(" User accounts subsystem ready\n");
+    boot_ok("User accounts subsystem ready");
 
     /* ---- 启动完成横幅 ---- */
     vga_dbg(15, '!');
@@ -487,39 +444,24 @@ void kernel_main(void)
      */
     if (boot_drive < 0x80) {
         serial_puts("[PlexsDOS] boot source: floppy/CD (DL < 0x80).\n");
-        screen_set_color(0x0E, 0x00);
-        screen_puts("  [II]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" Boot source: removable media\n");
+        boot_info("Boot source: removable media");
 #if defined(MINIMAL_KERNEL) || defined(DEBUG_SKIP_INSTALLER)
         serial_puts("[PlexsDOS] boot from floppy/CD, entering shell (debug mode)...\n");
-        screen_set_color(0x0E, 0x00);
-        screen_puts("  [II]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" Installer bypassed (debug), launching shell...\n");
+        boot_info("Installer bypassed (debug), launching shell...");
         shell_main();
 #else
         serial_puts("[PlexsDOS] boot from floppy/CD, starting installer...\n");
-        screen_set_color(0x0E, 0x00);
-        screen_puts("  [II]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" Installation mode activated\n");
+        boot_info("Installation mode activated");
         installer_run();
         /* 安装程序返回后停机 — 用户已被告知移除介质并重启 */
         serial_puts("[PlexsDOS] installer finished, halting.\n");
-        screen_set_color(0x0C, 0x00);
-        screen_puts("  [!!]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" Installation complete — remove media and reboot\n");
+        boot_fail("Installation complete — remove media and reboot");
         for (;;)
             __asm__ __volatile__("cli; hlt");
 #endif
     } else {
         serial_puts("[PlexsDOS] boot source: hard disk (DL >= 0x80).\n");
-        screen_set_color(0x0A, 0x00);
-        screen_puts("  [OK]");
-        screen_set_color(0x07, 0x00);
-        screen_puts(" Boot source: hard disk\n");
+        boot_ok("Boot source: hard disk");
     }
 
     /* 正常启动 Shell */
