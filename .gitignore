@@ -80,7 +80,19 @@ Desktop.ini
 .DS_Store
 
 # 项目配置文件（公共仓库不包含）
+AGENTS.md
 CLAUDE.md
+
+# 官网/前端项目（独立项目，不纳入本仓库）
+website/
+website/node_modules/
+website/.nuxt/
+website/.output/
+website/dist/
+plexsdos-website/
+plexsdos-site/
+plexsdos-website.design/
+web/
 
 # 平台专属配置
 .gitee/
@@ -88,3 +100,6 @@ CLAUDE.md
 
 # 串口日志输出
 serial-port-output-file.txt
+
+# IDE/Agent 本地元数据（不纳入版本控制）
+.trae/
