@@ -103,3 +103,6 @@ serial-port-output-file.txt
 
 # IDE/Agent 本地元数据（不纳入版本控制）
 .trae/
+
+# SHA-256 镜像仓库（用于推送内网 origin，不纳入版本控制）
+.sha256-mirror/
